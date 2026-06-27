@@ -137,11 +137,19 @@ returns into one slate, then prune:
      that venue's slice as `total_amount` and **that venue's own NAV** as `nav`. Never compare an IBKR
      size to a crypto one under one denominator, and never report a single blended cross-venue exposure.
 5. **Funnel cap.** Hand only the best few survivors to Stage 1 (default ~3-5, or exactly the N the user
-   asked to invest in, +1-2 spare so the gates have room to drop one). **Absolute ceiling: never hand
-   more than 6 names into the depth pipeline**, regardless of tier, request, or how many the envoys
-   surfaced — no "analyze them all". This hard cap is what keeps the EXPENSIVE per-name depth pipeline
-   from running on dozens of names; if more look interesting, rank and keep the top 6, mention the rest
-   as also-rans rather than running them.
+   asked for, +1-2 spare so the gates have room to drop one). Two distinct limits — don't conflate them:
+   - **Model-discretion ceiling (~6).** When the user did NOT name a count, never hand more than ~6 names
+     into the depth pipeline regardless of tier or how many the envoys surfaced — no self-directed
+     "analyze them all". Rank, keep the top ~6, mention the rest as also-rans. This is what stops the
+     EXPENSIVE per-name depth pipeline from spontaneously running on dozens.
+   - **An explicit user count OVERRIDES that ceiling** ("bring me 10 stocks"). In **read-only research /
+     recommendation** mode there is no money at risk, so the requested count IS the deliverable — honor
+     it. Announce the cost first ("10 names = a deep dive each, ~Nx the work — going ahead"), and for a
+     large count you may **tier the depth** (full Analyst→Bull×Bear→pre-mortem on the strongest cluster,
+     a lighter first-pass-plus read on the tail) rather than skimping all of them equally.
+   - **Execution mode keeps the ≤~6 money-bearing cap.** Researching 10 to recommend is fine; putting
+     real money into more than ~6 names in a single pass is a concentration/cost guard and is NOT
+     overridden by a research count — if the user wants money in more, confirm that explicitly.
 
 **B5 — Handoff.** The surviving slate IS the `candidates` arrow into Stage 1. From here the pipeline is
 unchanged: each survivor runs Analysts → Bull×Bear → Trader → (execution mode) data-sufficiency → Risk/PM
