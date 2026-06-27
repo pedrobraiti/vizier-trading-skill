@@ -109,6 +109,22 @@ def test_trim_quantity_floors_to_step_never_up():
     assert rounded["qty"] <= rounded["raw_qty"] + 1e-9  # never above the raw target
 
 
+def test_trim_quantity_sub_lot_flags_below_min_lot():
+    """A trim smaller than one market lot floors to 0. That is NOT a successful
+    trim — the risk reduction silently doesn't happen — so it must be flagged so
+    the skill can surface it instead of sending a zero-qty exit."""
+    result = risk.trim_quantity(current_qty=100.0, pct=0.5, step=1.0)  # 0.5 share -> floors to 0
+    assert result["qty"] == 0.0
+    assert result["below_min_lot"] is True
+    assert result["rounded_down"] is True
+
+
+def test_trim_quantity_normal_trim_is_not_below_min_lot():
+    result = risk.trim_quantity(current_qty=2.0, pct=30, step=0.1)
+    assert result["qty"] == pytest.approx(0.6)
+    assert result["below_min_lot"] is False
+
+
 def test_trim_quantity_caps_at_holding():
     # A dollar trim larger than the position must not oversell.
     result = risk.trim_quantity(current_qty=1.0, current_price=100.0, dollar_amount=500.0)

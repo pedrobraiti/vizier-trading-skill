@@ -97,7 +97,9 @@ ambiguity — never double/triple confirmation of the obvious, never fear of inv
 ## Modes
 
 - **Default = CONFIRMATION, for everyone including Pedro.** Show the decision and wait for the OK
-  before any live order.
+  before acting — EXCEPT a complete explicit order (asset + amount, e.g. "buy $50 of AAPL") is itself
+  the confirmation and executes after the safety gates without an extra prompt (see the calibration
+  note above). Confirmation-by-default applies to under-specified or skill-derived trades.
 - **Autonomy = explicit opt-in**, per command or per session ("execute without asking"). It is a
   conscious choice with hard prerequisites — see `references/autonomy-and-safety.md`. Never self-arm.
 - **Birth posture = shadow / paper-first.** Out of the box, execution journals the decision instead of
@@ -202,7 +204,11 @@ under one denominator. Mechanics differ sharply by venue: `references/execution-
   every ticker to it before any thesis/tranche/provenance/reconcile call — exact-string matching will
   miss `BTC` vs `BTC/USDT`.
 - A short-term sell may only reduce the **`tactical`** tranche (`tranche-sell`); below that, surface the
-  contradiction instead of eating the `core`. If `tranche_balances` sums to 0 but the broker shows a
+  contradiction instead of eating the `core`. `trim-qty` (with `"ticker"` + `"tag"`) cross-checks this and
+  can return **`tranche_check.allowed == false`** when a tactical trim would eat into the core tranche —
+  **honor the block**: never silently shrink the trim to fit. Surface it plainly — *"cannot sell {qty}
+  {tag} tranche — only {remaining} available; trim {other_tag} instead or ask the user"* — and let the
+  user decide. If `tranche_balances` sums to 0 but the broker shows a
   non-zero position, that is memory drift — **stop and ask**, never trust the all-zero verdict.
 
 ## Non-goals

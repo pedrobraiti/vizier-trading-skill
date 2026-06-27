@@ -272,6 +272,12 @@ def trim_quantity(
         units = math.floor(round(raw / step, 9))
         qty = round(units * step, 12)
 
+    # A non-zero requested trim that floors to 0 means the trim is smaller than
+    # one market lot: it would send a zero-qty exit and the intended risk
+    # reduction silently does NOT happen. Flag it so the skill can surface it
+    # rather than treating a no-op as a successful trim.
+    below_min_lot = qty == 0.0 and raw > LIMIT_EPSILON
+
     return {
         "qty": qty,
         "raw_qty": raw,
@@ -279,6 +285,7 @@ def trim_quantity(
         "step": step,
         "rounded_down": qty < raw - LIMIT_EPSILON,
         "capped_to_holding": capped_to_holding,
+        "below_min_lot": below_min_lot,
     }
 
 

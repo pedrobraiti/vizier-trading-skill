@@ -46,6 +46,7 @@ reach GitHub. Only ``EXAMPLE_*`` templates are committed to the public repo.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -55,6 +56,8 @@ from typing import Any
 import yaml
 
 from .constants import AUTONOMY_WINDOW_SECONDS
+
+_LOGGER = logging.getLogger(__name__)
 
 # A git runner is injectable so tests never touch a real repo. It receives the
 # git args (without the leading "git") and the cwd; it returns nothing the
@@ -122,13 +125,24 @@ def _thesis_path(ticker: str, open_date: str, memory_dir: Path) -> Path:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read a JSONL file, tolerating malformed lines.
+
+    A single corrupt line (e.g. a torn write or a partial flush) must NOT hard-
+    break day-state reconstruction: one bad row would otherwise wipe out every
+    good decision in the log. Matching the sibling Valet hardening, a line that
+    fails to parse is skipped (and logged) and the good lines still aggregate.
+    """
     if not path.exists():
         return []
     entries: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            _LOGGER.warning("skipping malformed JSONL line %d in %s", number, path)
     return entries
 
 
@@ -501,6 +515,13 @@ def arm_autonomy(
     active = {"baseline_nav": float(nav), "window_start": iso, "armed_at": iso}
     state["active"] = active
     state["run_start"] = None  # a fresh arm has no run until begin_run is called
+    # A fresh arm is the explicit manual re-arm after a drawdown kill: it clears
+    # the persisted kill latch so the new armed window starts clean. (Re-arming
+    # mid-window is already refused above, so this only runs for a legitimate
+    # re-arm — after a disarm or window expiry.)
+    state["killed"] = False
+    state["killed_reason"] = None
+    state["killed_at"] = None
     state.setdefault("history", []).append(
         {"event": "arm", "timestamp": iso, "baseline_nav": float(nav)}
     )
@@ -531,6 +552,11 @@ def disarm_autonomy(
     state = _read_autonomy_state(memory_dir)
     state["active"] = None
     state["run_start"] = None
+    # Disarm also clears the kill latch: the post-kill path disarms, and the
+    # only way back to armed is a fresh arm (which re-checks the latch anyway).
+    state["killed"] = False
+    state["killed_reason"] = None
+    state["killed_at"] = None
     state.setdefault("history", []).append(
         {"event": "disarm", "timestamp": iso, "reason": reason}
     )
@@ -574,6 +600,62 @@ def begin_run(
         runner=runner,
     )
     return {"run_start": iso}
+
+
+def latch_drawdown_kill(
+    reason: str,
+    *,
+    now: datetime | str | None = None,
+    memory_dir: str | Path = DEFAULT_MEMORY_DIR,
+    commit: bool = False,
+    runner: GitRunner | None = None,
+) -> dict[str, Any]:
+    """Persist the drawdown-kill latch so the kill SELF-LATCHES in code.
+
+    Recomputing the kill from ``current_nav`` alone is not enough: if NAV dips to
+    the kill threshold (gate blocks) but the skill never disarms, a later NAV
+    recovery would silently re-allow autonomy. Once latched here, the composed
+    gate hard-blocks regardless of recovered NAV until an explicit disarm or a
+    fresh ``arm_autonomy`` clears it. Idempotent: a second call is a no-op.
+    """
+    memory_dir = Path(memory_dir)
+    moment = _parse_dt(now) or datetime.now(UTC)
+    iso = moment.isoformat()
+
+    state = _read_autonomy_state(memory_dir)
+    if state.get("killed"):
+        return {
+            "killed": True,
+            "killed_reason": state.get("killed_reason"),
+            "killed_at": state.get("killed_at"),
+        }
+    state["killed"] = True
+    state["killed_reason"] = reason
+    state["killed_at"] = iso
+    state.setdefault("history", []).append(
+        {"event": "drawdown_kill", "timestamp": iso, "reason": reason}
+    )
+    _write_autonomy_state(memory_dir, state)
+    _maybe_commit(
+        "autonomy: drawdown kill latched",
+        memory_dir=memory_dir,
+        commit=commit,
+        runner=runner,
+    )
+    return {"killed": True, "killed_reason": reason, "killed_at": iso}
+
+
+def drawdown_kill_latch(
+    *,
+    memory_dir: str | Path = DEFAULT_MEMORY_DIR,
+) -> dict[str, Any]:
+    """The persisted drawdown-kill latch (durable across the armed window)."""
+    state = _read_autonomy_state(Path(memory_dir))
+    return {
+        "killed": bool(state.get("killed")),
+        "killed_reason": state.get("killed_reason"),
+        "killed_at": state.get("killed_at"),
+    }
 
 
 def current_day_baseline(

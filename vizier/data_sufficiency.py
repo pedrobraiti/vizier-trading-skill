@@ -26,7 +26,7 @@ ABSTAIN = "abstain"
 
 # Signal names that count as a valuation "multiple" — any one present satisfies
 # the "≥1 multiple" requirement.
-MULTIPLE_KEYS = ("pe", "forward_pe", "ev_ebitda", "pb", "ps", "ev_sales", "peg")
+MULTIPLE_KEYS = ("pe", "pe_ratio", "forward_pe", "ev_ebitda", "pb", "ps", "ev_sales", "peg")
 
 
 @dataclass(frozen=True)

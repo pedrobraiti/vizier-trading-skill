@@ -11,6 +11,13 @@ account, never the label. The raw boolean differs by venue (`isPaper` on IBKR, `
 **key off `account_type`, never a venue-specific boolean** (asserting `isPaper` on a crypto response reads
 a field that isn't there → silently passes, which is exactly how a "shadow" run leaks into LIVE).
 
+**The venues are asymmetric on how trustworthy `account_type` is.** On IBKR it is **broker-verified** — it
+derives from the broker's real `isPaper`, so a mislabel is independently caught. On CRYPTO it only
+reflects your own **`CRYPTO_TRADING_MODE`** setting; the exchange does not hand back a paper/live truth, so
+`account_type` **cannot independently detect a mislabel** there. Real-money protection on crypto therefore
+rests on the **`CRYPTO_ALLOW_LIVE`** gate (and `CRYPTO_DRY_RUN`), **not** on `account_type` — treat the
+crypto `account_type` as a self-report, and never let it alone authorize a live order.
+
 ---
 
 ## Pre-flight (both venues, before EVERY order)

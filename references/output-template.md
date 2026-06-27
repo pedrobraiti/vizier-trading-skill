@@ -45,7 +45,10 @@ Sources — <primary first (SEC, releases), then aggregators; with as_of where r
   skill-managed (monitoring), not a resting stop on the exchange"* — and, when honest, that in
   confirmation mode it is only checked when you next run Vizier / at session start, not continuously (a
   true 24/7 soft stop needs armed autonomy + a scheduled loop).
-- **Abstention is a valid Action.** "None — no edge today" is a complete, respectable answer.
+- **Abstention is a valid Action.** "None — no edge today" is a complete, respectable answer. This holds
+  even when the data-sufficiency gate abstains/downsizes **every** candidate — dropping the whole slate is
+  a legitimate outcome, not a failure to act. Report "None — no edge today" honestly; don't force a trade
+  to look productive.
 - **Read-only calls never show an Action that executed** — they end at recommendations.
 
 ## Empty-call (market sweep) shape

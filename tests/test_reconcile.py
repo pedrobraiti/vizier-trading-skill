@@ -65,6 +65,15 @@ def test_reconcile_unions_broker_position():
     assert result["double_buy_risk"] is False
 
 
+def test_reconcile_matches_broker_position_keyed_by_symbol():
+    """Valet's execution server keys positions by ``symbol`` (not ``ticker``).
+    The broker-side cross-check must still match, or the 'own-log UNION broker
+    positions' intent silently degrades to own-log-only."""
+    positions = [{"symbol": "AAA", "quantity": 3, "market_value": 300}]
+    result = reconcile.reconcile_exposure([], positions, ticker="AAA", now=_now())
+    assert result["broker_position"] == positions[0]
+
+
 def test_order_without_timestamp_is_treated_as_in_flight():
     sent = [{"ticker": "AAA", "side": "buy", "status": "submitted"}]
     result = reconcile.reconcile_exposure(sent, [], ticker="AAA", now=_now())

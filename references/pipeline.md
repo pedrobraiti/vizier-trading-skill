@@ -69,6 +69,7 @@ mode ends here** — present long & short reads, mark divergence, and stop.
 ```bash
 python -m vizier data-sufficiency --json '{"scout_responses": {"price":..., "pe":..., "sector":...}, "decision_type": "valuation"}'
 ```
+(The multiple key may be `pe` or Scout's native `pe_ratio` — the gate accepts both.)
 `abstain` → don't size (even under an explicit order — say so honestly). `downsize` → cut conviction/
 size. `proceed` → continue.
 

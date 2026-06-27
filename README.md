@@ -55,8 +55,11 @@ researched, risk-checked, journaled trades. It is the one component that touches
   thesis/position carries a `core` vs `tactical` tag so anti-churn applies correctly per horizon.
 - **Multi-venue** — US equities/ETFs (the `ibkr` server) and crypto spot (the `crypto` server), routed by
   the asset; risk limits and NAV are kept strictly per-account / per-venue.
-- **Confirmation by default; autonomy strictly opt-in** — it shows its reasoning and waits for your OK
-  before any live order. Autonomy is a conscious choice with hard, code-enforced prerequisites.
+- **Confirmation by default; autonomy strictly opt-in** — a complete, explicit order (asset + amount,
+  e.g. *"buy $50 of AAPL"*) is itself the confirmation: it executes after the safety gates without an
+  extra prompt. "Confirmation by default" is what governs **under-specified or skill-derived** trades
+  ("invest a little", a thesis Vizier proposed) — there it shows its reasoning and waits for your OK
+  before any live order. Autonomy is a separate, conscious choice with hard, code-enforced prerequisites.
 
 ## How it thinks
 
@@ -120,12 +123,30 @@ shadow (journal / dry-run)  ->  paper / testnet  ->  live read-only  ->  real-mo
 
 ## Install & use
 
+### Full-stack setup (in order)
+
+First time? The three repos have a dependency order — set them up in this sequence:
+
+1. **Scout** (data MCP — keyless, fast): [`mcp-market-research`](https://github.com/pedrobraiti/mcp-market-research).
+   Gives you research immediately, no accounts or keys.
+2. **Valet** (execution MCP — the longest step): [`agentic-trading-mcp`](https://github.com/pedrobraiti/agentic-trading-mcp).
+   For stocks it needs the Interactive Brokers Client Portal Gateway running plus a manual 2FA login;
+   for crypto it needs exchange API keys. Skip this until you actually want to execute.
+3. **Vizier** (this skill + its core): install per below, then **register BOTH MCP servers** with Claude
+   Code, and open a **new** Claude Code session so the skill and servers are picked up.
+
+Two facts that decide what works without each piece: a read-only market sweep ("what's happening in the
+market?") **requires the Scout MCP registered** — without it the skill has no data tools and degrades to
+nothing useful; **execution requires the Valet MCP registered**. Research-only needs just Scout + Vizier.
+
+### Installing this repo
+
 Vizier has two pieces that both need to be in place: the **skill** (so `/vizier` is discoverable) and the
 **deterministic core** (so the skill can call `python -m vizier ...`).
 
 ```bash
 # 1. Clone
-git clone <your-fork-url> vizier && cd vizier
+git clone https://github.com/pedrobraiti/vizier-trading-skill vizier && cd vizier
 
 # 2. Install the deterministic core into the environment your agent uses.
 #    The `vizier` package MUST be importable for `python -m vizier` to work.
@@ -163,6 +184,11 @@ python -m vizier trim-qty --json '{"current_qty":2.0,"pct":30,"step":0.001}'    
 Risk posture is **one editable file** — `config/risk_profile.yaml`: flip `active_profile`
 (`conservative | moderate | aggressive`) or tweak a single number. Every limit is a percent of NAV, so it
 works the same on a $100 account or a $100k one.
+
+**Environment overrides.** Two optional env vars relocate the core's inputs without passing flags every
+call: `VIZIER_PROFILE_PATH` (the risk-profile YAML, same as `--profile-path`) and `VIZIER_MEMORY_DIR`
+(the private `memory/` dir, same as `--memory-dir`). Vizier holds no secrets, so there's nothing to put
+in a `.env`.
 
 ## Memory & privacy model
 

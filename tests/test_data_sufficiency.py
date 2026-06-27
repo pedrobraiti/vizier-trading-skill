@@ -37,6 +37,15 @@ def test_valuation_any_multiple_satisfies():
     assert result["sufficient"] is True
 
 
+def test_valuation_pe_ratio_satisfies_multiple():
+    """Scout's native field is ``pe_ratio`` (not ``pe``); it must count as a
+    valuation multiple so a fully-fed Scout response proceeds."""
+    responses = {"price": 142.3, "pe_ratio": 21.4, "sector": "Tech"}
+    result = data_sufficiency.assess(responses, "valuation")
+    assert result["sufficient"] is True
+    assert result["recommended_action"] == "proceed"
+
+
 def test_technical_needs_nonempty_price_history():
     empty = data_sufficiency.assess({"price_history": []}, "technical")
     assert empty["recommended_action"] == "abstain"

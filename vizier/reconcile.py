@@ -86,7 +86,13 @@ def reconcile_exposure(
     ]
     recent_buys = [o for o in active_buys if _within_lag_window(o, now, lag_window_seconds)]
 
-    broker_position = next((p for p in broker_positions if p.get("ticker") == ticker), None)
+    # Valet's execution server keys positions by ``symbol`` (its Position model
+    # field), not ``ticker``. Read either so the broker-side cross-check actually
+    # matches instead of silently degrading to own-log-only.
+    broker_position = next(
+        (p for p in broker_positions if (p.get("ticker") or p.get("symbol")) == ticker),
+        None,
+    )
 
     double_buy_risk = len(recent_buys) > 0
     if double_buy_risk:

@@ -169,6 +169,20 @@ def test_append_decision_is_append_only_jsonl(memory_dir):
     assert json.loads(lines[0])["intent"] == "buy"
 
 
+def test_read_decision_log_skips_one_corrupt_line(memory_dir):
+    """A single torn/partial JSONL line must NOT hard-break reconstruction: the
+    good lines still parse and aggregate (matching the Valet hardening)."""
+    memory.append_decision({"intent": "buy", "ticker": "AAA"}, memory_dir=memory_dir)
+    # Inject a corrupt line between two good ones.
+    log_path = memory_dir / memory.DECISION_LOG_NAME
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write("{not valid json at all\n")
+    memory.append_decision({"intent": "sell", "ticker": "BBB"}, memory_dir=memory_dir)
+
+    entries = memory.read_decision_log(memory_dir=memory_dir)
+    assert [e["ticker"] for e in entries] == ["AAA", "BBB"]
+
+
 # ── reconcile-ready own_sent_orders from the decision log ────────────────────
 
 

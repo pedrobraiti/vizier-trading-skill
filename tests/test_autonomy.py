@@ -257,6 +257,58 @@ def test_gate_drawdown_kill_fires_even_with_budget(profile, memory_dir):
     assert any(b["type"] == "drawdown_kill" for b in gate["blocks"])
 
 
+def test_drawdown_kill_latches_across_nav_recovery(profile, memory_dir):
+    """Once the kill fires, autonomy stays killed even if NAV recovers above the
+    threshold — the latch is persisted, so the skill failing to disarm cannot
+    silently re-enable autonomy on a bounce."""
+    memory.arm_autonomy(1_000, now=NOW, memory_dir=memory_dir)
+    memory.begin_run(now=NOW + timedelta(minutes=1), memory_dir=memory_dir)
+
+    # NAV dips to the kill threshold -> gate blocks AND latches.
+    killed = autonomy.check_autonomy_gate(
+        candidate_value=10, current_nav=850, profile=profile,
+        now=NOW + timedelta(minutes=2), memory_dir=memory_dir,
+    )
+    assert killed["allowed"] is False
+    assert any(b["type"] == "drawdown_kill" for b in killed["blocks"])
+    assert memory.drawdown_kill_latch(memory_dir=memory_dir)["killed"] is True
+
+    # NAV recovers fully, but the latch keeps autonomy killed.
+    recovered = autonomy.check_autonomy_gate(
+        candidate_value=10, current_nav=1_000, profile=profile,
+        now=NOW + timedelta(minutes=3), memory_dir=memory_dir,
+    )
+    assert recovered["allowed"] is False
+    assert recovered["kill"] is True
+    assert recovered["kill_latched"] is True
+    assert any(b["type"] == "drawdown_kill" for b in recovered["blocks"])
+
+
+def test_drawdown_kill_latch_clears_on_disarm_and_fresh_arm(profile, memory_dir):
+    """The latch clears only on the explicit manual path: disarm, then a fresh
+    arm re-opens a clean window and the gate allows again."""
+    memory.arm_autonomy(1_000, now=NOW, memory_dir=memory_dir)
+    memory.begin_run(now=NOW + timedelta(minutes=1), memory_dir=memory_dir)
+    autonomy.check_autonomy_gate(
+        candidate_value=10, current_nav=850, profile=profile,
+        now=NOW + timedelta(minutes=2), memory_dir=memory_dir,
+    )
+    assert memory.drawdown_kill_latch(memory_dir=memory_dir)["killed"] is True
+
+    # A killed-but-still-in-window user must disarm first, then re-arm.
+    memory.disarm_autonomy(now=NOW + timedelta(minutes=3), memory_dir=memory_dir)
+    memory.arm_autonomy(1_000, now=NOW + timedelta(minutes=4), memory_dir=memory_dir)
+    memory.begin_run(now=NOW + timedelta(minutes=5), memory_dir=memory_dir)
+    assert memory.drawdown_kill_latch(memory_dir=memory_dir)["killed"] is False
+
+    gate = autonomy.check_autonomy_gate(
+        candidate_value=10, current_nav=990, profile=profile,
+        now=NOW + timedelta(minutes=6), memory_dir=memory_dir,
+    )
+    assert gate["allowed"] is True
+    assert gate["kill_latched"] is False
+
+
 def test_gate_allows_within_all_limits(profile, memory_dir):
     memory.arm_autonomy(1_000, now=NOW, memory_dir=memory_dir)
     memory.begin_run(now=NOW + timedelta(minutes=1), memory_dir=memory_dir)

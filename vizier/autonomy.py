@@ -121,22 +121,41 @@ def check_autonomy_gate(
     if not ceiling["allowed"]:
         blocks.append({"type": "cumulative_ceiling", "message": ceiling["reason"]})
 
+    # The drawdown kill must SELF-LATCH: a live recompute from current_nav alone
+    # would re-allow autonomy if NAV dipped to the threshold (gate blocked) but
+    # the skill never disarmed and NAV later recovered. So a kill is persisted
+    # and, once latched, hard-blocks REGARDLESS of current NAV until an explicit
+    # disarm or a fresh arm clears it. The latch resets only on re-arm/disarm.
     kill = drawdown_kill_check(
         nav_at_loop_start=baseline,
         current_nav=current_nav,
         drawdown_kill_pct=profile.autonomy.drawdown_kill_pct,
     )
-    if kill["kill"]:
-        blocks.append(
-            {
-                "type": "drawdown_kill",
-                "message": (
-                    f"drawdown {kill['drawdown_pct']:.1f}% >= "
-                    f"{kill['threshold_pct']:g}% kill threshold; disarm autonomy "
-                    "and require manual re-arm"
-                ),
-            }
+    latch = memory.drawdown_kill_latch(**mem_kwargs)
+    already_latched = latch["killed"]
+    if kill["kill"] and not already_latched:
+        latch = memory.latch_drawdown_kill(
+            f"drawdown {kill['drawdown_pct']:.1f}% >= {kill['threshold_pct']:g}% kill threshold",
+            now=moment,
+            **mem_kwargs,
         )
+        already_latched = True
+
+    killed = kill["kill"] or already_latched
+    if killed:
+        if kill["kill"]:
+            kill_message = (
+                f"drawdown {kill['drawdown_pct']:.1f}% >= "
+                f"{kill['threshold_pct']:g}% kill threshold; disarm autonomy "
+                "and require manual re-arm"
+            )
+        else:
+            kill_message = (
+                f"autonomy killed and latched ({latch['killed_reason']}); NAV may "
+                "have recovered but autonomy stays killed until an explicit disarm "
+                "and fresh re-arm"
+            )
+        blocks.append({"type": "drawdown_kill", "message": kill_message})
 
     return {
         "allowed": not blocks,
@@ -152,5 +171,6 @@ def check_autonomy_gate(
         "trades_this_run": run["trades_this_run"],
         "per_run_remaining_budget": per_run["remaining_budget"] if per_run else 0.0,
         "drawdown_pct": kill["drawdown_pct"],
-        "kill": kill["kill"],
+        "kill": killed,
+        "kill_latched": already_latched,
     }
