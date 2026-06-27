@@ -115,6 +115,10 @@ panic, still want the 3?"), reconcile, run the data-sufficiency + limits gates, 
 for the OK. Calibration stays: "buy $3 of AAPL" executes after the gates without re-confirming the
 obvious; only REAL ambiguity pauses to ask.
 
+**Breadth discovery does not change the gates.** The Stage B envoys are research-only (they cannot
+trade), and every survivor still passes data-sufficiency → limits → breaker → (if armed) autonomy-gate
+**per candidate on the main thread**. The funnel ranks and prunes; it never pre-authorizes a trade.
+
 ## Precedence (when rules collide)
 
 **Risk rules (stop, breaker) > anti-churn > horizon tags.** A pre-committed stop firing is never churn.

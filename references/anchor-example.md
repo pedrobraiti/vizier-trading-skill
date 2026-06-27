@@ -24,9 +24,13 @@ $100"), walk these steps. It exercises every part of the design; deviate only wi
    ```
    If tripped: in confirmation, ask once ("market in panic — still want the 3?"); in autonomy, abandon.
 
-4. **Generate candidates.** `market_movers`/`crypto_movers`, `sector_performance`, `retail_buzz`/
-   `crypto_buzz`, `news_search`, `etf_holdings`. (No `screen`/`peers`.) Shortlist > 3 so the gates have
-   room to drop one.
+4. **Generate candidates = Stage B breadth discovery** (this request is broad → don't use the thin
+   `market_movers` sweep, which yields correlated picks). As **manager**, read the regime, **partition
+   the market into coverage areas**, dispatch research-only envoys by area (one parallel batch), then
+   dedup and **funnel-prune with `correlation_matrix`/`crypto_correlation_matrix`** so the shortlist is
+   DIVERSIFIED, not three of the same bet. Shortlist > 3 so the gates have room to drop one. (For a
+   seeded/narrow request, fall back to the Stage 0 thin candidate line.) See `references/pipeline.md`
+   Stage B.
 
 5. **Per-candidate deep dive = the pipeline.** Fan out Analysts (parallel) → Bull×Bear → Trader proposes
    thesis + horizon tag + conviction (1-5), for BOTH horizons. (`references/pipeline.md`.)

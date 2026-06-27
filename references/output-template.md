@@ -58,6 +58,46 @@ Lead with portfolio state + what moved today + open theses needing attention + a
 tie-breaker). When not logged into IBKR, degrade to a market-only panorama and say positions are
 unavailable without a session.
 
+## Breadth-discovery report shape (class 2 — the manager's slate)
+
+When you ran the Stage B fan-out, **lead with this report**, then give the standard §F per-name block
+for each survivor that finished the depth pipeline. The **pruning rationale is the centerpiece** — "who
+survived and why", as if a superior will judge it.
+
+```
+TL;DR — <N ideas across M areas; top pick X; "execute?" only if the request authorized it>
+
+Macro framing — <regime line: rates / VIX / dominance, and what it favors> (2-3 lines)
+
+Coverage map — who looked where
+  • {Area 1} envoy — {scope} — surfaced: A, B
+  • {Area 2} envoy — {scope} — surfaced: C
+  • {Area 3} envoy — {scope} — no edge (reported empty — this is honest, not a gap)
+  ... (one line per envoy, including the empty-handed ones)
+
+Candidate slate — the FULL funnel input (pre-prune)
+  | ticker | area | venue | case | key risk | conv | evidence (as_of) |
+  (every row the envoys returned, so the pruning can be judged)
+
+Pruning rationale — WHO SURVIVED AND WHY   ← the centerpiece
+  • Kept:  X (area, conv) — best risk/reward, lowest correlation to the rest
+           Z (area, conv) — diversifier, near-term catalyst
+  • Cut:   Y — corr {0.x} with X (redundant bet; kept the stronger)
+           W — weaker risk/reward
+           V — evidence too thin (would fail data-sufficiency anyway)
+  • Diversification check — correlation_matrix (equity) / crypto_correlation_matrix (crypto)
+    summary; cross-venue risk-on/off note (qualitative — there is no cross-venue matrix)
+
+The final ≥3 (handed to the deep-dive pipeline)
+  • X · Z · … — each: venue + one-line + first-pass conviction
+
+Venue note — equity legs sized vs IBKR NAV; crypto legs vs crypto NAV; never mixed.
+```
+
+Then, for each survivor, the standard §F block above (By horizon · Action · Conviction · Scenarios ·
+Risks · Pre-mortem · Post-trade portfolio · Sources). Abstention still applies — if the funnel and gates
+drop everything, "**None — no edge today**" is a complete, respectable slate.
+
 ## Performance summary (periodic, folded into the morning brief when enabled)
 
 Return vs SPY, P&L per thesis, hit rate. This is how the user answers "how am I doing?" — content fixed,

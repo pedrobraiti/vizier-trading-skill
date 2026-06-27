@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
-  <img src="https://img.shields.io/badge/core-96%20tests-brightgreen" alt="96 tests">
+  <img src="https://img.shields.io/badge/core-103%20tests-brightgreen" alt="103 tests">
   <img src="https://img.shields.io/badge/posture-paper--first-orange" alt="Posture: paper-first">
 </p>
 
@@ -55,6 +55,11 @@ researched, risk-checked, journaled trades. It is the one component that touches
   thesis/position carries a `core` vs `tactical` tag so anti-churn applies correctly per horizon.
 - **Multi-venue** — US equities/ETFs (the `ibkr` server) and crypto spot (the `crypto` server), routed by
   the asset; risk limits and NAV are kept strictly per-account / per-venue.
+- **Manager / breadth discovery** — a broad request (*"analyze the market and bring me recommendations"*)
+  makes Vizier the **manager of a research team**: it partitions the market into coverage areas, fans out
+  **research-only** envoy subagents across them in parallel, then prunes the funnel by potential, risk/reward
+  and **correlation-based diversification** — so the shortlist spans the market instead of three of the same
+  bet. The envoys can only read (Scout); only the main thread ever executes.
 - **Confirmation by default; autonomy strictly opt-in** — a complete, explicit order (asset + amount,
   e.g. *"buy $50 of AAPL"*) is itself the confirmation: it executes after the safety gates without an
   extra prompt. "Confirmation by default" is what governs **under-specified or skill-derived** trades
@@ -170,6 +175,22 @@ For execution you also need the two MCP servers registered ([Scout](https://gith
 > To remove the deployed skill, delete the link: Windows `rmdir "%USERPROFILE%\.claude\skills\vizier"`
 > (removing the junction, **not** its target); Linux/macOS `rm ~/.claude/skills/vizier`.
 
+### Hard research firewall (optional, recommended)
+
+Breadth-discovery (manager mode) fans out **research-only** envoy subagents. By default that boundary is
+held by dispatch discipline (the envoy is given only Scout tools). For a **hard** firewall — an envoy that
+*cannot even see* the execution tools — install the bundled agent type so the envoys are spawned with the
+Valet servers withheld:
+
+```bash
+# copy the agent type into your user agents dir (active next session)
+mkdir -p ~/.claude/agents && cp agents/vizier-research-envoy.md ~/.claude/agents/
+```
+
+The agent's `disallowedTools` blocks Vizier's execution servers (`ibkr`, `crypto`). If you registered Valet
+under different server names, edit that list (see the maintainer note inside the file). Without this, the
+soft dispatch boundary still applies and only the main thread ever executes.
+
 ### The deterministic core
 
 Every money-sensitive helper is a subcommand; args go in `--json`, the result comes back as `{ok, data}`:
@@ -210,7 +231,7 @@ the horizon, the quantitative baseline to diff against. That state is **private*
 ## Development
 
 ```bash
-pytest -q          # 96 offline tests (deterministic, no network, no real git)
+pytest -q          # 103 offline tests (deterministic, no network, no real git)
 ruff check .       # lint
 ```
 
