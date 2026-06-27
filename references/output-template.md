@@ -66,7 +66,9 @@ Sources — <primary first (SEC, releases), then aggregators; with as_of where r
 - **Abstention is a valid Action.** "None — no edge today" is a complete, respectable answer. This holds
   even when the data-sufficiency gate abstains/downsizes **every** candidate — dropping the whole slate is
   a legitimate outcome, not a failure to act. Report "None — no edge today" honestly; don't force a trade
-  to look productive.
+  to look productive. (**Caveat — read-only with an explicit count:** there the gate ANNOTATES, it does not
+  gate-out — deliver the N names asked for with honest caveats rather than dropping them; see the breadth-
+  discovery shape below.)
 - **Read-only calls never show an Action that executed** — they end at recommendations.
 
 ## Empty-call (market sweep) shape
@@ -113,8 +115,12 @@ Venue note — equity legs sized vs IBKR NAV; crypto legs vs crypto NAV; never m
 ```
 
 Then, for each survivor, the standard §F block above (By horizon · Action · Conviction · Scenarios ·
-Risks · Pre-mortem · Post-trade portfolio · Sources). Abstention still applies — if the funnel and gates
-drop everything, "**None — no edge today**" is a complete, respectable slate.
+Risks · Pre-mortem · Post-trade portfolio · Sources). Abstention still applies to an **unscoped / open**
+request — if the funnel and gates drop everything, "**None — no edge today**" is a complete, respectable
+slate. But when the user gave an **explicit count in read-only mode**, the contract is **N names
+delivered-with-flags**: thin / low-conviction names are shown with an honest caveat ("couldn't fully
+verify", weak edge) rather than silently removed. If truly nothing researchable exists for a name, say so
+per name — still listing it — rather than coming in under the requested N.
 
 ## Performance summary (periodic, folded into the morning brief when enabled)
 

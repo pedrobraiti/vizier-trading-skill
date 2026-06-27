@@ -22,6 +22,9 @@ calls swapped for Scout tools and their execution swapped for Valet tools**.
 *(In breadth discovery, research mode stops at the ranked slate AND each survivor's Trader proposal —
 the full per-name read short of execution, exactly as B5 hands off; the envoys are ALWAYS research-only,
 regardless of mode — only the main orchestrator thread ever executes.)*
+*(In read-only mode the data-sufficiency gate may still run, but only to **annotate** each name's
+conviction/quality — it never gates a name out of a requested recommendation count; the count is the
+contract. See Stage 4 and B4 step 5.)*
 
 ---
 
@@ -56,16 +59,23 @@ line is INPUT to the partition and is pasted into every envoy dispatch so envoys
 not in a vacuum.
 
 **B1 — Partition the market into coverage AREAS (regime-informed).** Carve the universe into **disjoint**
-areas spanning **US equities/ETFs + crypto spot** (the default universe). Mix the axes — don't just list
-GICS sectors:
+areas. For an **unscoped** broad sweep the default universe spans **US equities/ETFs + crypto spot**; when
+the user **explicitly scopes** the request (asset class, sector, or theme), the partition MUST honor that
+scope — see the scope rule below. Mix the axes — don't just list GICS sectors:
 - by **sector** (tech, energy, financials, healthcare, industrials, staples/defensives, …)
 - by **theme** (AI/datacenter, rate-sensitives, reshoring, GLP-1, power/uranium, …)
 - by **style/factor** (quality compounders, deep-value/turnarounds, high-momentum, dividend/defensive)
 - by **asset class** (crypto majors BTC/ETH; crypto themes — L1/L2, DeFi, stablecoin/RWA)
 
-Bias the partition toward where the regime says edge lives, but **always include ≥1 contrarian/defensive
-area and ≥1 crypto area** so the slate cannot collapse into one risk-on cluster (this, with B4, is the
-direct fix for "3 of the same bet"). Areas must be **mutually exclusive** — give each envoy an explicit
+Bias the partition toward where the regime says edge lives. **For an unscoped broad sweep, always include
+≥1 contrarian/defensive area and ≥1 crypto area** so the slate cannot collapse into one risk-on cluster
+(this, with B4, is the direct fix for "3 of the same bet"). **When the user explicitly scopes the request**
+— asset class ("ações"/stocks/equities/ETFs only, or conversely crypto-only), sector, or theme — that
+scope OVERRIDES the diversity seed and the equities+crypto default: narrow the areas to the scope and
+**SUPPRESS the forced off-scope areas** (no crypto area for a stocks-only request; no off-theme or forced-
+contrarian areas for a themed request like "AI/datacenter" or "energy"). The diversity seed is the default
+for **open/unscoped** requests only — never a reason to return an off-scope name the user didn't ask for.
+Areas must be **mutually exclusive** — give each envoy an explicit
 boundary ("you own ENERGY: large-cap E&P, oil services, refiners; do NOT cover utilities or uranium —
 that's the Power envoy"). An unavoidable cross-area name (an ETF, a conglomerate) is resolved at the B4
 merge, never by overlapping mandates.
@@ -118,7 +128,11 @@ returns into one slate, then prune:
 1. **Dedup** — same ticker from two envoys → one row, keep the stronger case, note it surfaced in
    multiple areas (a mild positive, not a conviction multiplier).
 2. **Score & cut the weak** — rank by potential × risk/reward (qualitative, per Stage 5's "your
-   qualitative judgment"). Drop regime-mismatched and thin-evidence names.
+   qualitative judgment"). Drop regime-mismatched and thin-evidence names. **When the user explicitly
+   scoped a horizon** ("short-term, ≤1yr"), score **for that horizon**: a name attractive ONLY in the
+   non-requested horizon is off-scope for the ranked picks — tag it "off-scope: long-term only" and keep
+   it out of the scoped ranking, never rank it as a top short-term pick. The other horizon is still SHOWN
+   as context (the multi-horizon mandate stands for presentation), but it earns no spot on the scoped list.
 3. **Correlation-based diversification — THE fix.** Run `correlation_matrix` on the surviving **equity**
    shortlist and `crypto_correlation_matrix` on the **crypto** shortlist. Where two survivors are highly
    correlated, **keep the higher-conviction one and backfill from a lower-correlation candidate still on
@@ -137,7 +151,12 @@ returns into one slate, then prune:
      that venue's slice as `total_amount` and **that venue's own NAV** as `nav`. Never compare an IBKR
      size to a crypto one under one denominator, and never report a single blended cross-venue exposure.
 5. **Funnel cap.** Hand only the best few survivors to Stage 1 (default ~3-5, or exactly the N the user
-   asked for, +1-2 spare so the gates have room to drop one). Two distinct limits — don't conflate them:
+   asked for). **Execution mode only:** hand +1-2 spare so the gates have room to drop one. **Read-only
+   research/recommendation mode:** there is no money at risk, so a named count N is a **CONTRACT** —
+   deliver exactly N names. The data-sufficiency gate (and `limits`) then **ANNOTATE** each name (flag
+   thin data / low conviction / "couldn't fully verify") and **NEVER remove a name from the requested
+   count**. Do NOT run `limits` (an execution concentration check) to prune a pure recommendation slate.
+   Two distinct limits — don't conflate them:
    - **Model-discretion ceiling (~6).** When the user did NOT name a count, never hand more than ~6 names
      into the depth pipeline regardless of tier or how many the envoys surfaced — no self-directed
      "analyze them all". Rank, keep the top ~6, mention the rest as also-rans. This is what stops the
@@ -204,6 +223,11 @@ python -m vizier data-sufficiency --json '{"scout_responses": {"price":..., "pe"
 (The multiple key may be `pe` or Scout's native `pe_ratio` — the gate accepts both.)
 `abstain` → don't size (even under an explicit order — say so honestly). `downsize` → cut conviction/
 size. `proceed` → continue.
+
+**In read-only research/recommendation mode this gate ANNOTATES, it does not gate-out.** Run it to grade a
+name's conviction/quality — an `abstain`/`downsize` becomes an honest caveat on the name ("couldn't fully
+verify", low conviction), NOT a reason to drop it from a requested count. Gating a name *out* is an
+execution-mode action (it protects money); with no money at risk the user's requested count stands.
 
 **Pick the right `decision_type`, and require it to pass — the verdict is only as honest as the type you
 ask for** (each type has its own minimum; relabelling thin data to a cheaper type green-lights it):

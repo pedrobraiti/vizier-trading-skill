@@ -81,8 +81,10 @@ There is **one** command. Behavior is decided by reading the user's intent, not 
    potential + risk/reward + **correlation-based diversification** so the survivors are NOT one
    correlated bet, and feed the survivors into the per-name pipeline (class 3/5 depth). **Read-only by
    default** — it ends at the ranked slate + recommendations and executes ONLY when the request also
-   authorizes execution (class 5) and ONLY on this main thread. Default universe = US equities/ETFs
-   **+ crypto spot** (risk kept per venue). Full stage spec: `references/pipeline.md` (Stage B). **This
+   authorizes execution (class 5) and ONLY on this main thread. Default universe (for an **unscoped** sweep)
+   = US equities/ETFs **+ crypto spot** (risk kept per venue); an **explicit asset-class / sector / theme
+   scope narrows it** — a stocks-only request carries no crypto area. Full stage spec:
+   `references/pipeline.md` (Stage B). **This
    is NOT the class-1 empty-call sweep** — the trigger is the demand to produce/rank across a broad
    scope, not to merely describe the market; when scope is broad but that demand is ambiguous, run the
    cheap class-1 sweep and **offer** the fan-out rather than silently spending it.
@@ -150,7 +152,9 @@ Reuse the installed **`deep-research`** skill for heavy narrative ("what's happe
 
 **Manager / breadth-discovery front-half (class 2).** On a broad-discovery request you are the
 **manager of a research team** before you are an analyst. Read the regime, **partition the market into
-coverage areas** (sector · theme · style · asset-class, equities **+ crypto**), and dispatch N
+coverage areas** (sector · theme · style · asset-class, equities **+ crypto** by default — but an
+**explicit scope narrows the universe**: a stocks-only ask carries no crypto leg, a themed ask no off-
+theme areas), and dispatch N
 **envoy** subagents fanned by AREA (not by role) — each **research-only**, each returning a structured
 candidate shortlist. Spawn them as the **`vizier-research-envoy`** agent type when it is installed (it
 withholds the Valet execution tools — a hard firewall); otherwise spawn standard subagents and grant
@@ -166,7 +170,12 @@ exhaustive 8-12). Full spec, dispatch seed, candidate schema and funnel criteria
 
 Every relevant analysis yields a **long-term** read (quality/fundamentals) **and** a **short-term** read
 (technicals/catalyst/flow), and presents both — **divergence is a feature** ("long: strong; short:
-overbought, wait"). Each thesis/position carries a horizon **tag** (`core` vs `tactical`); anti-churn
+overbought, wait"). Presenting both is the **presentation** mandate. But when the user **explicitly scopes
+a horizon** ("short-term, up to 1 year"), that horizon also **DRIVES selection and ranking**: a candidate
+attractive ONLY in the non-requested horizon is **excluded from the ranked picks** (or explicitly tagged
+"off-scope: long-term only" — never silently ranked as a top short-term pick). The other horizon is still
+**shown as context**, but it does not earn a name a spot on the scoped list. Each thesis/position carries
+a horizon **tag** (`core` vs `tactical`); anti-churn
 and the thesis-check apply per tag (a labeled tactical trade is legitimate; a core is not churned
 without a documented thesis break).
 
