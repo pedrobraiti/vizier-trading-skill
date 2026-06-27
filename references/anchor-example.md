@@ -43,9 +43,19 @@ $100"), walk these steps. It exercises every part of the design; deviate only wi
 
 7. **Risk gate + sizing.** Allocate the $100 by conviction and cap per asset. The $100 is an explicit
    order, so pass `"explicit_order": true` (otherwise any sub-floor leg, conviction < 2, is silently
-   dropped):
+   dropped). **This single `allocate` is correct only because all three survivors are on ONE venue
+   (`ibkr` equities), sized against the IBKR NAV:**
    ```bash
-   python -m vizier allocate --json '{"total_amount":100,"nav":<NAV>,"explicit_order":true,"candidates":[{"ticker":"AAA","conviction":5},{"ticker":"BBB","conviction":3},{"ticker":"CCC","conviction":2}]}'
+   python -m vizier allocate --json '{"total_amount":100,"nav":<IBKR_NAV>,"explicit_order":true,"candidates":[{"ticker":"AAA","conviction":5},{"ticker":"BBB","conviction":3},{"ticker":"CCC","conviction":2}]}'
+   ```
+   **Mixed-venue slate** (say AAA/BBB on `ibkr`, conviction 5+3=8, plus a `crypto` BTC/USDT leg,
+   conviction 4): do NOT pass one `total_amount`/`nav` across both — that blends two NAVs under one
+   denominator (B4 forbids it). First **partition the $100 by aggregate conviction per venue** — 8/12 →
+   $66.67 to equities, 4/12 → $33.33 to crypto (tie → split by leg count) — then run **two** `allocate`
+   calls, each with its venue's slice as `total_amount` and that venue's own NAV:
+   ```bash
+   python -m vizier allocate --json '{"total_amount":66.67,"nav":<IBKR_NAV>,"explicit_order":true,"candidates":[{"ticker":"AAA","conviction":5},{"ticker":"BBB","conviction":3}]}'
+   python -m vizier allocate --json '{"total_amount":33.33,"nav":<CRYPTO_NAV>,"explicit_order":true,"candidates":[{"ticker":"BTC/USDT","conviction":4}]}'
    ```
    Then check each leg against the book:
    ```bash

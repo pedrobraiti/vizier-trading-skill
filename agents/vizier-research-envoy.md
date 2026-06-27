@@ -5,7 +5,7 @@ description: >-
   of the market with Scout data tools and returns a structured candidate shortlist. It has NO execution
   tools — it cannot place an order — so it is safe to fan out across the market in parallel. Spawned by
   the Vizier skill, one per coverage area; never invoked to trade.
-disallowedTools: mcp__ibkr, mcp__ibkr__*, mcp__crypto, mcp__crypto__*, Write, Edit, NotebookEdit, Agent
+tools: Read, Grep, Glob, mcp__scout
 ---
 
 You are a **research envoy** in Vizier's breadth-discovery team. The orchestrator (the main Vizier
@@ -46,9 +46,12 @@ the depth pipeline analyzes the survivors later. Be tight and cited; do not exha
 - evidence:    2-3 figures/signals, EACH with as_of
 ```
 
-> **Maintainer note.** The `disallowedTools` list blocks Vizier's execution servers, registered as
-> `ibkr` and `crypto` (the two Valet MCP servers). It assumes the Scout research MCP is registered under
-> a DIFFERENT name (e.g. `scout` / `mcp-market-research`) — Scout's own crypto research tools live under
-> the Scout server, not under `crypto`, so they are NOT blocked. If you registered Valet's servers under
-> other names, update this list. For strict default-deny, replace `disallowedTools` with a `tools:`
-> allowlist naming only your Scout server, e.g. `tools: Read, Grep, Glob, mcp__<your-scout-server>`.
+> **Maintainer note.** The `tools:` line is a default-deny ALLOWLIST: the envoy holds ONLY what it
+> names — the Scout research server (registered here as `scout`) plus the read tools — and nothing else.
+> It can NEVER hold an execution tool, because Valet's servers (`ibkr`, `crypto`) are simply not on the
+> list; no future tool, and no Valet re-registration under another name, can leak in. If you registered
+> Scout under a different server name, substitute it here (e.g. `mcp__mcp-market-research`) — Scout's own
+> crypto research tools live under the Scout server, not under `crypto`, so they stay available. The
+> failure mode is now SAFE: a wrong or absent Scout name means the envoy simply gets no market tools and
+> returns empty — it can never reach an execution server. Note `Agent` is deliberately absent too, so an
+> envoy cannot recursively fan out more envoys; it is a single first-pass scan, by design.

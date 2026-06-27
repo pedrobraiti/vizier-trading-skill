@@ -50,7 +50,7 @@ def test_cli_size_envelope(capsys, profile_path):
         ],
     )
     assert env["ok"] is True
-    assert env["data"]["size"] == 100.0
+    assert env["data"]["size"] == 65.0  # 100 * 5/5 * 0.65 (conviction-full-size knob)
 
 
 def test_cli_data_sufficiency_abstain(capsys):

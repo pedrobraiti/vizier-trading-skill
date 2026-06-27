@@ -28,6 +28,7 @@ def test_aggressive_matches_spec():
     assert p.autonomy.per_run_max_trades == 5
     assert p.autonomy.daily_cumulative_pct == 50
     assert p.conviction_floor == 2
+    assert p.conviction_full_size_pct_of_cap == 65  # conviction-5 -> 65% of cap
 
 
 def test_all_three_profiles_load():

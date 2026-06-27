@@ -119,6 +119,7 @@ non-executing branch:
 | What the user says | Routes to | Executes? |
 |---|---|---|
 | "buy $3 of AAPL" (asset + amount) | explicit order (class 5) | **yes**, after the gates |
+| "invest $100 across 3 ideas" (amount set, names skill-DERIVED) | breadth discovery + execution (class 5) | **yes — but confirm the proposed slate FIRST** (the picks are yours to ratify, so it isn't a complete explicit order; the amount is fixed, the names are not) |
 | "analyze the market, bring me ideas" | broad discovery (class 2) | no — only if the request also authorizes it |
 | "invest a little" / "do something" / "just fix it" | vague instruction-to-act | **no** — analyze + ASK for asset·amount |
 | "take a look at Apple" / "I think I should sell" | single-name research / thinking-out-loud | **no** — present the case, wait |
@@ -158,7 +159,7 @@ the funnel by potential, risk/reward and explicit `correlation_matrix`/`crypto_c
 diversification, and hand the survivors to the per-name pipeline above. **Only this orchestrator thread
 ever executes** — envoys never trade; "research amply AND invest in the best" happens AFTER the funnel,
 on the main thread, through the same gates. Team size scales to the request (light 3-4 · balanced 5-6 ·
-exhaustive 8+). Full spec, dispatch seed, candidate schema and funnel criteria: `references/pipeline.md`
+exhaustive 8-12). Full spec, dispatch seed, candidate schema and funnel criteria: `references/pipeline.md`
 (Stage B).
 
 ## Multi-horizon mandate
@@ -208,6 +209,14 @@ under one denominator. Mechanics differ sharply by venue: `references/execution-
   you confirm **once** ("market in panic — VIX/drawdown at the limit — still want the 3?"), not
   repeatedly. In autonomy a trip **abandons** the remaining orders, disarms, and escalates to manual.
   **Precedence: risk rules (stop, breaker) > anti-churn > horizon tags.**
+- **Unsolicited crypto must be disclosed before it trades.** Breadth mode's universe always includes
+  crypto (a diversity benefit, kept in RESEARCH), so a user who said "find me 3 investments and buy $100"
+  meaning stocks can end up with a crypto leg they never named. When the user did **NOT** mention crypto,
+  any crypto leg in the proposed slate must be **called out EXPLICITLY at the confirmation step before
+  any crypto order** — name it, its venue and its soft-stop/separate-account nature ("1 of 3 is BTC/USDT
+  on the `crypto` exchange — soft skill-managed stop, separate account — include it?") — and the crypto
+  venue must be **okayed** by the user. Never route real money to the crypto exchange on an
+  unsolicited leg without that explicit OK, even when the overall $-amount was authorized.
 - **Crypto protective stops are SOFT** (skill-monitored, not a resting order on the exchange) — disclose
   this **verbatim on every crypto stop**, and that it only fires while Vizier is actively running / at
   session start (in confirmation mode it will NOT fire on its own; a 24/7 watch needs armed autonomy + a

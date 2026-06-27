@@ -19,7 +19,8 @@ calls swapped for Scout tools and their execution swapped for Valet tools**.
 ```
 
 **Research mode stops at "Trader proposes."** Execution mode continues through the gates to the Valet.
-*(In breadth discovery, research mode stops at the ranked slate; the envoys are ALWAYS research-only,
+*(In breadth discovery, research mode stops at the ranked slate AND each survivor's Trader proposal —
+the full per-name read short of execution, exactly as B5 hands off; the envoys are ALWAYS research-only,
 regardless of mode — only the main orchestrator thread ever executes.)*
 
 ---
@@ -74,8 +75,13 @@ merge, never by overlapping mandates.
   secular · crypto.
 - **Balanced (5-6, DEFAULT for "bring me recommendations")** — finer sector/theme split + a style
   envoy + 1-2 crypto envoys.
-- **Exhaustive (8+)** — "sweep everything". Full sector ladder + style factors + crypto-sector split +
-  macro-theme envoys.
+- **Exhaustive (8-12)** — "sweep everything". Full sector ladder + style factors + crypto-sector split +
+  macro-theme envoys. Cap the team at **12** even for "sweep everything" — more envoys is diminishing
+  coverage at linear token cost.
+
+**Announce the team size before spending it.** At dispatch, tell the user how many envoys you're about to
+spin up and why ("spinning up 6 area researchers — balanced sweep across sectors, a style factor and
+crypto"), so the multi-agent token cost is a stated choice, not a silent surprise. One line, then go.
 
 Run all envoys for a tier in **ONE parallel batch** (a single message, multiple Agent calls). Never
 chain them serially — that is the token/latency blow-up.
@@ -119,18 +125,35 @@ returns into one slate, then prune:
    the slate**. Target: survivors span areas AND are not mutually correlated. There is **no cross-venue
    matrix** — for equity↔crypto co-movement apply a qualitative risk-on/off judgment (high-beta tech and
    BTC move together in risk-on) and flag it; never invent a number.
-4. **Venue separation.** Rank the combined slate by merit for the RECOMMENDATION order, but keep risk
-   per venue: when a budget exists, size each venue's legs against **that venue's own NAV** via a
-   separate `allocate` call — never compare an IBKR size to a crypto one under one denominator, never
-   report a single blended cross-venue exposure.
+4. **Venue separation + budget split.** Rank the combined slate by merit for the RECOMMENDATION order,
+   but keep risk per venue. A single user budget ("$100 across 3") spanning both venues must first be
+   **partitioned across venues, THEN allocated within each**:
+   - **Partition rule.** Split the budget across venues in proportion to each venue's **aggregate
+     first-pass conviction** (Σ conviction of that venue's surviving legs ÷ Σ conviction of all
+     survivors). E.g. equity legs summing to conviction 8 and a crypto leg of conviction 4 → 8/12 of the
+     budget to equities, 4/12 to crypto. If the per-venue conviction sums **tie**, fall back to
+     splitting by **leg count** per venue.
+   - **Then allocate within each venue.** Run a **separate `allocate`** for each venue's legs, passing
+     that venue's slice as `total_amount` and **that venue's own NAV** as `nav`. Never compare an IBKR
+     size to a crypto one under one denominator, and never report a single blended cross-venue exposure.
 5. **Funnel cap.** Hand only the best few survivors to Stage 1 (default ~3-5, or exactly the N the user
-   asked to invest in, +1-2 spare so the gates have room to drop one). This hard cap is what keeps the
-   EXPENSIVE depth pipeline from running on dozens of names.
+   asked to invest in, +1-2 spare so the gates have room to drop one). **Absolute ceiling: never hand
+   more than 6 names into the depth pipeline**, regardless of tier, request, or how many the envoys
+   surfaced — no "analyze them all". This hard cap is what keeps the EXPENSIVE per-name depth pipeline
+   from running on dozens of names; if more look interesting, rank and keep the top 6, mention the rest
+   as also-rans rather than running them.
 
 **B5 — Handoff.** The surviving slate IS the `candidates` arrow into Stage 1. From here the pipeline is
 unchanged: each survivor runs Analysts → Bull×Bear → Trader → (execution mode) data-sufficiency → Risk/PM
 → pre-mortem → Stage 7. Research mode stops at the ranked slate + per-name Trader proposals; execution
 mode continues through the gates **on the main thread only**.
+
+**Unsolicited-crypto disclosure (execution mode).** Because B1 always seeds ≥1 crypto area, a slate built
+for a user who never mentioned crypto can carry a crypto leg. If so, **flag every such leg explicitly at
+the confirmation step and get the crypto venue okayed before any crypto order** ("1 of 3 is BTC/USDT on
+the `crypto` exchange — soft skill-managed stop, separate account — include it?"). Keep crypto in the
+RESEARCH universe regardless (the diversity is the point); the gate is only on *executing* an unsolicited
+crypto leg. See SKILL.md safety rules + `references/output-template.md`.
 
 ## Stage 1 — Analysts (fan out in parallel, one subagent each)
 
@@ -190,10 +213,12 @@ ask for** (each type has its own minimum; relabelling thin data to a cheaper typ
 
 - Size: `python -m vizier size --json '{"slot_base":<base>, "conviction":n, "nav":NAV}'`, or for a fixed
   budget across N names `python -m vizier allocate --json '{"total_amount":100, "candidates":[...], "nav":NAV}'`.
-  - **`slot_base` = the full-size slot a max-conviction (5) position gets = the per-asset cap =
-    `NAV * max_pct_per_asset/100`** (`size` scales it by `conviction/5` and re-caps at the same per-asset
-    limit). This is the deterministic default; do not invent the number. **(Manager: I picked
-    per-asset-cap as `slot_base` — flagged for ratification.)**
+  - **`slot_base` = the per-asset cap = `NAV * max_pct_per_asset/100`.** Pass that as `slot_base`; the
+    core does the rest. A max-conviction (5) position sizes to a configured FRACTION of that cap —
+    `conviction_full_size_pct_of_cap` (default 65%) — leaving headroom, while the per-asset cap stays the
+    hard ceiling. `size` scales `slot_base` by `conviction/5 × pct/100` and re-caps at the per-asset
+    limit. This is the deterministic default; do not invent the number and do NOT apply the fraction by
+    hand — the core honors the knob (Rule #2). Retune it per profile in `config/risk_profile.yaml`.
   - **When the user named an exact dollar amount** ("buy $3 of AAPL"), DON'T call `size` — pass that
     amount straight to `limits` and the order. `size`/`allocate` are only for unspecified amounts.
   - **Explicit order below the conviction floor:** `size`/`allocate` silently **drop** a sub-floor leg

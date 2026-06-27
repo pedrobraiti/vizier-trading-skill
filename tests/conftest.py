@@ -20,6 +20,7 @@ profiles:
     max_pct_per_sector: 40
     min_cash_pct: 5
     max_positions: 8
+    conviction_full_size_pct_of_cap: 65
     circuit_breaker:
       vix_threshold: 38
       monthly_drawdown_pct: 18

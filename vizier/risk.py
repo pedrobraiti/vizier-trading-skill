@@ -48,6 +48,7 @@ class RiskProfile:
     min_cash_pct: float
     max_positions: int
     conviction_floor: int
+    conviction_full_size_pct_of_cap: float
     circuit_breaker: CircuitBreaker
     autonomy: Autonomy
 
@@ -84,6 +85,11 @@ def load_profile(path: str | Path, name: str | None = None) -> RiskProfile:
         min_cash_pct=float(body["min_cash_pct"]),
         max_positions=int(body["max_positions"]),
         conviction_floor=int(raw.get("conviction_floor", 0)),
+        # Default 65 so an older config without the knob still loads and sizes
+        # sanely (conviction-5 at 65% of the per-asset cap).
+        conviction_full_size_pct_of_cap=float(
+            body.get("conviction_full_size_pct_of_cap", 65)
+        ),
         circuit_breaker=CircuitBreaker(
             vix_threshold=float(breaker["vix_threshold"]),
             monthly_drawdown_pct=float(breaker["monthly_drawdown_pct"]),
@@ -114,8 +120,14 @@ def position_size(
     *,
     explicit_order: bool = False,
 ) -> dict[str, Any]:
-    """Linear conviction sizing: ``slot_base * (conviction/5)`` capped at the
-    per-asset NAV limit.
+    """Linear conviction sizing scaled by the conviction-full-size knob:
+    ``slot_base * (conviction/5) * (conviction_full_size_pct_of_cap/100)``, then
+    hard-capped at the per-asset NAV limit.
+
+    With ``slot_base`` set to the per-asset cap (the deterministic default), a
+    max-conviction (5) position targets ``cap * conviction_full_size_pct_of_cap/100``
+    — a configured FRACTION of the cap (default 65%), leaving headroom — while the
+    per-asset cap stays the hard ceiling on the result.
 
     Conviction below the profile floor is skipped (size 0) unless ``explicit_order``
     is set for this exact ticker — honesty over a forced trade, but an explicit
@@ -136,7 +148,8 @@ def position_size(
             ),
         }
 
-    raw = slot_base * (conviction / MAX_CONVICTION)
+    full_size_fraction = profile.conviction_full_size_pct_of_cap / PERCENT
+    raw = slot_base * (conviction / MAX_CONVICTION) * full_size_fraction
     cap = _asset_cap(nav, profile)
     size = min(raw, cap)
     capped = raw > cap + LIMIT_EPSILON

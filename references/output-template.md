@@ -5,6 +5,8 @@ when there's something worth saying, and give more than the minimum when it help
 the user asked about.
 
 ```
+MODE: PAPER | LIVE · venue: ibkr | crypto    ← REQUIRED on any confirm/execute output
+
 TL;DR — <the decision in ONE line>
 
 By horizon
@@ -13,6 +15,7 @@ By horizon
   (mark divergence explicitly, e.g. "long: strong; short: overbought — wait")
 
 Action — <the trade(s): venue, side, size, order type> OR "none — no edge today"
+  per name, tag the status:  [RECOMMENDATION — not placed]  |  [EXECUTED — order id …]
 
 Conviction — n/5  ·  <one line why>
 
@@ -34,6 +37,21 @@ Sources — <primary first (SEC, releases), then aggregators; with as_of where r
 
 ## Rules that bind the format
 
+- **MODE/venue banner is REQUIRED, not prose.** Every output that confirms or executes an order must
+  open with the `MODE: PAPER | LIVE · venue: ibkr | crypto` banner line, sourced **directly from the
+  `session_status` `account_type` assertion** you ran before the order (PAPER/LIVE is the one field
+  identically named on both venues). Name every venue in play. It is a mandatory field of the template —
+  the user must never have to guess whether real money is at stake or which exchange it lands on. A
+  mixed-venue slate shows both venues (e.g. `venue: ibkr + crypto`).
+- **Per-name status tag — advice vs order.** Each survivor's Action line carries an explicit tag so a
+  recommendation is never mistaken for a placed order: **`[RECOMMENDATION — not placed]`** for anything
+  not executed (research mode, abstained leg, awaiting confirmation), **`[EXECUTED — order id <id>]`**
+  once the fill is confirmed. Never rely on prose to convey whether an order went in.
+- **Unsolicited crypto is called out at confirm.** When the user did NOT mention crypto but the slate
+  carries a crypto leg, the confirmation step must flag it EXPLICITLY before any crypto order — name it,
+  its venue and its soft-stop/separate-account nature ("1 of 3 is BTC/USDT on the `crypto` exchange —
+  soft skill-managed stop, separate account — include it?") — and the crypto venue must be okayed. Do
+  not bury an unsolicited crypto leg inside the slate (SKILL.md safety rules).
 - **Open with crossed thesis triggers.** If the start-of-session thesis-check found an open thesis that
   crossed its review trigger, that goes at the **TOP**, above everything — never bury it.
 - **Honest price-target scope.** Relay the sell-side consensus as third-party data **plus** at most a

@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
-  <img src="https://img.shields.io/badge/core-103%20tests-brightgreen" alt="103 tests">
+  <img src="https://img.shields.io/badge/core-105%20tests-brightgreen" alt="105 tests">
   <img src="https://img.shields.io/badge/posture-paper--first-orange" alt="Posture: paper-first">
 </p>
 
@@ -59,7 +59,11 @@ researched, risk-checked, journaled trades. It is the one component that touches
   makes Vizier the **manager of a research team**: it partitions the market into coverage areas, fans out
   **research-only** envoy subagents across them in parallel, then prunes the funnel by potential, risk/reward
   and **correlation-based diversification** — so the shortlist spans the market instead of three of the same
-  bet. The envoys can only read (Scout); only the main thread ever executes.
+  bet. The envoys can only read (Scout); only the main thread ever executes. Note the cost split: a plain
+  *"what's going on in the market?"* is the **cheap, fixed, read-only** sweep, while *"bring me
+  recommendations"* triggers the **expensive multi-agent fan-out** (N parallel envoys) — Vizier never
+  auto-escalates the cheap call into the expensive one. Breadth defaults to a **US equities/ETFs + crypto
+  spot** universe (risk kept per venue).
 - **Confirmation by default; autonomy strictly opt-in** — a complete, explicit order (asset + amount,
   e.g. *"buy $50 of AAPL"*) is itself the confirmation: it executes after the safety gates without an
   extra prompt. "Confirmation by default" is what governs **under-specified or skill-derived** trades
@@ -169,7 +173,8 @@ ln -s "$(pwd)" ~/.claude/skills/vizier
 ```
 
 In a **new** Claude Code session the skill is available — invoke it in natural language (the trigger is the
-intent, e.g. *"research NVDA"*, *"is my book healthy?"*, *"buy $50 of BTC"*, *"invest $100 across 3 ideas"*).
+intent, e.g. *"research NVDA"*, *"is my book healthy?"*, *"buy $50 of BTC"*, *"invest $100 across 3 ideas"*,
+or the breadth sweep *"analyze the market and bring me recommendations"* / *"find the best opportunities"*).
 For execution you also need the two MCP servers registered ([Scout](https://github.com/pedrobraiti/mcp-market-research),
 [Valet](https://github.com/pedrobraiti/agentic-trading-mcp)); for research-only the skill degrades gracefully.
 
@@ -207,9 +212,11 @@ Valet servers withheld:
 mkdir -p ~/.claude/agents && cp agents/vizier-research-envoy.md ~/.claude/agents/
 ```
 
-The agent's `disallowedTools` blocks Vizier's execution servers (`ibkr`, `crypto`). If you registered Valet
-under different server names, edit that list (see the maintainer note inside the file). Without this, the
-soft dispatch boundary still applies and only the main thread ever executes.
+The agent's frontmatter is a default-deny `tools:` **allowlist** (`Read, Grep, Glob, mcp__scout`): the
+envoy holds ONLY the Scout research server plus read tools and **can never see an execution tool** — no
+Valet re-registration or new tool can leak in. If you registered Scout under a different server name,
+substitute it there (see the maintainer note inside the file). Without this agent installed, the soft
+dispatch boundary still applies and only the main thread ever executes.
 
 ### The deterministic core
 
@@ -251,7 +258,7 @@ the horizon, the quantitative baseline to diff against. That state is **private*
 ## Development
 
 ```bash
-pytest -q          # 103 offline tests (deterministic, no network, no real git)
+pytest -q          # 105 offline tests (deterministic, no network, no real git)
 ruff check .       # lint
 ```
 

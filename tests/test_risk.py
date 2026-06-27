@@ -11,10 +11,41 @@ from vizier import risk
 
 
 def test_position_size_is_linear_in_conviction(profile):
+    # Sizing is linear in conviction, then scaled by the 65% full-size knob.
     full = risk.position_size(slot_base=100, conviction=5, nav=10_000, profile=profile)
     half = risk.position_size(slot_base=100, conviction=2, nav=10_000, profile=profile)
-    assert full["size"] == pytest.approx(100.0)
-    assert half["size"] == pytest.approx(40.0)  # 100 * 2/5
+    assert full["size"] == pytest.approx(65.0)  # 100 * 5/5 * 0.65
+    assert half["size"] == pytest.approx(26.0)  # 100 * 2/5 * 0.65
+
+
+def test_conviction_five_sizes_to_fraction_of_cap(profile):
+    # With slot_base = the per-asset cap, a max-conviction position targets the
+    # configured fraction (65%) of that cap, NOT the full cap — headroom by design.
+    nav = 10_000
+    cap = nav * profile.max_pct_per_asset / 100  # 2500
+    result = risk.position_size(slot_base=cap, conviction=5, nav=nav, profile=profile)
+    assert result["size"] == pytest.approx(cap * 0.65)  # 1625
+    assert result["capped"] is False
+
+
+def test_conviction_full_size_knob_is_honored_and_cap_still_hard_caps(profile_path, tmp_path):
+    # A profile whose knob is 50 sizes conviction-5 to 50% of the cap...
+    yaml_50 = (profile_path.read_text(encoding="utf-8")
+               .replace("conviction_full_size_pct_of_cap: 65",
+                        "conviction_full_size_pct_of_cap: 50"))
+    path = tmp_path / "risk_profile_50.yaml"
+    path.write_text(yaml_50, encoding="utf-8")
+    profile_50 = risk.load_profile(path)
+
+    nav = 10_000
+    cap = nav * profile_50.max_pct_per_asset / 100  # 2500
+    at_knob = risk.position_size(slot_base=cap, conviction=5, nav=nav, profile=profile_50)
+    assert at_knob["size"] == pytest.approx(cap * 0.50)  # 1250 — the knob is honored
+
+    # ...but the per-asset cap is still the hard ceiling even with a giant slot_base.
+    over = risk.position_size(slot_base=1_000_000, conviction=5, nav=nav, profile=profile_50)
+    assert over["capped"] is True
+    assert over["size"] == pytest.approx(cap)  # never above the per-asset cap
 
 
 def test_position_size_capped_at_max_pct_per_asset(profile):
@@ -35,7 +66,7 @@ def test_explicit_order_overrides_conviction_floor(profile):
         slot_base=100, conviction=1, nav=10_000, profile=profile, explicit_order=True
     )
     assert result["skipped"] is False
-    assert result["size"] == pytest.approx(20.0)  # 100 * 1/5
+    assert result["size"] == pytest.approx(13.0)  # 100 * 1/5 * 0.65
 
 
 # ── "$100 across N candidates" allocation ────────────────────────────────────

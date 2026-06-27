@@ -39,6 +39,7 @@ profiles:
     max_pct_per_sector: 25     # no single sector above 25% of NAV
     min_cash_pct: 20           # always keep >=20% of NAV in cash
     max_positions: 15          # broad book, many small positions
+    conviction_full_size_pct_of_cap: 65  # conviction-5 sizes to this % of the per-asset cap; cap remains the hard ceiling
     circuit_breaker:
       vix_threshold: 28        # VIX above this -> stop adding risk without asking
       monthly_drawdown_pct: 10 # portfolio down >10% on the month -> same
@@ -57,6 +58,7 @@ profiles:
     max_pct_per_sector: 30
     min_cash_pct: 10
     max_positions: 12
+    conviction_full_size_pct_of_cap: 65  # conviction-5 sizes to this % of the per-asset cap; cap remains the hard ceiling
     circuit_breaker:
       vix_threshold: 33
       monthly_drawdown_pct: 14
@@ -79,6 +81,7 @@ profiles:
     max_pct_per_sector: 40     # SPEC
     min_cash_pct: 5            # SPEC
     max_positions: 8           # SPEC (~8, concentrated)
+    conviction_full_size_pct_of_cap: 65  # conviction-5 sizes to this % of the per-asset cap; cap remains the hard ceiling
     circuit_breaker:
       vix_threshold: 38        # SPEC
       monthly_drawdown_pct: 18 # SPEC
