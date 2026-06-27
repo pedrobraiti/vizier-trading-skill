@@ -137,8 +137,9 @@ First time? The three repos have a dependency order — set them up in this sequ
 2. **Valet** (execution MCP — the longest step): [`agentic-trading-mcp`](https://github.com/pedrobraiti/agentic-trading-mcp).
    For stocks it needs the Interactive Brokers Client Portal Gateway running plus a manual 2FA login;
    for crypto it needs exchange API keys. Skip this until you actually want to execute.
-3. **Vizier** (this skill + its core): install per below, then **register BOTH MCP servers** with Claude
-   Code, and open a **new** Claude Code session so the skill and servers are picked up.
+3. **Vizier** (this skill + its core): install per below, then **register BOTH MCP servers at user scope**
+   (see *Register the MCP servers* below), and open a **new** Claude Code session so the skill and servers
+   are picked up.
 
 Two facts that decide what works without each piece: a read-only market sweep ("what's happening in the
 market?") **requires the Scout MCP registered** — without it the skill has no data tools and degrades to
@@ -174,6 +175,25 @@ For execution you also need the two MCP servers registered ([Scout](https://gith
 
 > To remove the deployed skill, delete the link: Windows `rmdir "%USERPROFILE%\.claude\skills\vizier"`
 > (removing the junction, **not** its target); Linux/macOS `rm ~/.claude/skills/vizier`.
+
+### Register the MCP servers (user scope)
+
+The skill is global, so register Scout and Valet at **user scope** (`-s user`) — that makes them reachable
+from `/vizier` in any directory. The default `claude mcp add` is *project*-scoped, which silently limits a
+server to one folder (a common gotcha: the skill "works here but not there"). Point each command at the
+venv python from that repo's own README:
+
+```bash
+# Scout (research) — one server
+claude mcp add scout  -s user -- "/path/to/mcp-market-research/.venv/bin/python" -m scout.server.app
+# Valet (execution) — two servers from the same repo
+claude mcp add ibkr   -s user -- "/path/to/agentic-trading/.venv/bin/python"     -m ibkr_agent.server.app
+claude mcp add crypto -s user -- "/path/to/agentic-trading/.venv/bin/python"     -m crypto_agent.server.app
+```
+
+Open a **new** Claude Code session afterward so the servers are picked up (`claude mcp list` to confirm).
+Research-only needs just Scout; execution also needs Valet (with its IBKR gateway / exchange keys). On
+Windows use the `.venv\Scripts\python.exe` path instead of `.venv/bin/python`.
 
 ### Hard research firewall (optional, recommended)
 
