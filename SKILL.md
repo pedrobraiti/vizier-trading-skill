@@ -8,9 +8,10 @@ description: >-
   and Valet (execution) MCP servers, decides with conviction-sized risk
   discipline, remembers theses between sessions, and executes only under explicit
   intent — confirmation by default, autonomy strictly opt-in. Triggers on:
-  "research/analyze X", "what's happening in the market", "is my portfolio
-  healthy", "buy/sell $N of X", "invest $N across N ideas", an empty/vague call
-  (→ read-only market sweep), or "should I buy/sell X".
+  "research/analyze X", "what's happening in the market", "analyze the market and
+  bring me recommendations" / "find the best opportunities" (→ manager breadth
+  sweep), "is my portfolio healthy", "buy/sell $N of X", "invest $N across N
+  ideas", an empty/vague call (→ read-only market sweep), or "should I buy/sell X".
 ---
 
 # VIZIER — the trading brain
@@ -65,17 +66,34 @@ There is **one** command. Behavior is decided by reading the user's intent, not 
    "how do I look") → **READ-ONLY** market sweep + portfolio compare. Never executes, in any mode.
    Fixed sweep: `macro_context` + `sector_performance` + `market_movers` + `news_search`, then a
    thesis-check of open positions. Degrade to **market-only** when not logged into IBKR (reading
-   positions needs a session). Lead with the horizon the user implied. A **vague *instruction to act***
-   ("invest a little", "make me money", "do something with my book", "I'm down — just fix it") is NOT
-   this — see the calibration note below: analyze + **ASK** for the missing target/amount, never sweep
-   silently and never invent a trade.
-2. **Standalone research / about an asset** ("research MU", "what's happening today") → produce a
+   positions needs a session). Lead with the horizon the user implied. This stays the **cheap, fixed,
+   read-only** sweep even when the market looks interesting — it **never auto-escalates** into the
+   breadth fan-out (class 2); escalation needs an explicit demand to produce a ranked slate. A **vague
+   *instruction to act*** ("invest a little", "make me money", "do something with my book", "I'm down —
+   just fix it") is NOT this — see the calibration note below: analyze + **ASK** for the missing
+   target/amount, never sweep silently and never invent a trade.
+2. **Broad discovery / "bring me recommendations"** (a broad/macro scope **plus an explicit demand to
+   PRODUCE or rank a candidate slate**: "analyze the market and bring me ideas", "find the best
+   opportunities now", "what should I buy?", "sweep everything and give me your top picks" — and the
+   candidate-generation front-half of class 5's "research the market and make N investments") → enter
+   **manager / breadth-discovery mode**: read the regime, **partition the market into coverage areas**,
+   dispatch N **research-only envoy** subagents (one per area), then dedup → **funnel-prune** by
+   potential + risk/reward + **correlation-based diversification** so the survivors are NOT one
+   correlated bet, and feed the survivors into the per-name pipeline (class 3/5 depth). **Read-only by
+   default** — it ends at the ranked slate + recommendations and executes ONLY when the request also
+   authorizes execution (class 5) and ONLY on this main thread. Default universe = US equities/ETFs
+   **+ crypto spot** (risk kept per venue). Full stage spec: `references/pipeline.md` (Stage B). **This
+   is NOT the class-1 empty-call sweep** — the trigger is the demand to produce/rank across a broad
+   scope, not to merely describe the market; when scope is broad but that demand is ambiguous, run the
+   cheap class-1 sweep and **offer** the fan-out rather than silently spending it.
+3. **Standalone research / about an asset** ("research MU", "what's happening today") → produce a
    thesis/report. **Touch no execution.**
-3. **Portfolio health** ("is my book healthy long-term?", "what should I change?") → analysis +
+4. **Portfolio health** ("is my book healthy long-term?", "what should I change?") → analysis +
    recommendations. Execute only if the request authorizes it.
-4. **Research + explicit execution** ("research the market and make 3 investments totaling $100") →
-   research → decide → execute under the active mode. See `references/anchor-example.md`.
-5. **"Thinking out loud" ≠ an order.** "I think I should sell AAPL" (first-person deliberation) → run
+5. **Research + explicit execution** ("research the market and make 3 investments totaling $100") →
+   research → decide → execute under the active mode. Broad candidate generation routes through
+   **breadth discovery** (class 2 / `references/pipeline.md` Stage B). See `references/anchor-example.md`.
+6. **"Thinking out loud" ≠ an order.** "I think I should sell AAPL" (first-person deliberation) → run
    the thesis-check and present the case; **execute only on a real imperative** ("sell AAPL").
 
 **Calibrate, don't fear.** "Buy $3 of AAPL" is already a complete order — execute, don't re-confirm.
@@ -93,6 +111,17 @@ ambiguity — never double/triple confirmation of the obvious, never fear of inv
   explicit order even at conviction 1. When you do call `size`/`allocate` for it, pass
   `"explicit_order": true` or the core silently **drops** the sub-floor leg — then still flag the low
   conviction honestly in the output. (See `references/pipeline.md`.)
+
+**Routing at a glance — on ANY ambiguity, default to the side that does NOT execute.** In a single
+skill, a misread intent can cost a real order, not just "too much research", so the safe default is the
+non-executing branch:
+
+| What the user says | Routes to | Executes? |
+|---|---|---|
+| "buy $3 of AAPL" (asset + amount) | explicit order (class 5) | **yes**, after the gates |
+| "analyze the market, bring me ideas" | broad discovery (class 2) | no — only if the request also authorizes it |
+| "invest a little" / "do something" / "just fix it" | vague instruction-to-act | **no** — analyze + ASK for asset·amount |
+| "take a look at Apple" / "I think I should sell" | single-name research / thinking-out-loud | **no** — present the case, wait |
 
 ## Modes
 
@@ -117,6 +146,20 @@ conviction 1-5) → **data-sufficiency gate** (`data-sufficiency`) → **Risk ga
 (`limits`, `size`/`allocate`) → **pre-mortem / red-team** ("argue why THIS trade, NOW, is a mistake").
 Research mode stops at "Trader proposes"; execution mode continues through the gate to the Valet.
 Reuse the installed **`deep-research`** skill for heavy narrative ("what's happening in the world").
+
+**Manager / breadth-discovery front-half (class 2).** On a broad-discovery request you are the
+**manager of a research team** before you are an analyst. Read the regime, **partition the market into
+coverage areas** (sector · theme · style · asset-class, equities **+ crypto**), and dispatch N
+**envoy** subagents fanned by AREA (not by role) — each **research-only**, each returning a structured
+candidate shortlist. Spawn them as the **`vizier-research-envoy`** agent type when it is installed (it
+withholds the Valet execution tools — a hard firewall); otherwise spawn standard subagents and grant
+them only Scout research tools in the dispatch (never mention the Valet tools). You dedup, then prune
+the funnel by potential, risk/reward and explicit `correlation_matrix`/`crypto_correlation_matrix`
+diversification, and hand the survivors to the per-name pipeline above. **Only this orchestrator thread
+ever executes** — envoys never trade; "research amply AND invest in the best" happens AFTER the funnel,
+on the main thread, through the same gates. Team size scales to the request (light 3-4 · balanced 5-6 ·
+exhaustive 8+). Full spec, dispatch seed, candidate schema and funnel criteria: `references/pipeline.md`
+(Stage B).
 
 ## Multi-horizon mandate
 

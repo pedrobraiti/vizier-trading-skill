@@ -6,7 +6,12 @@ deliberately from TradingAgents (roles) and ai-hedge-fund (persona lenses) — b
 calls swapped for Scout tools and their execution swapped for Valet tools**.
 
 ```
-                 ┌──────────── Analysts (parallel) ────────────┐
+ broad-discovery?  ┌──────── Breadth discovery (MANAGER, Stage B) ───────┐
+   regime read ──► │ partition by AREA → N research-only envoys → dedup  │ ──► candidate
+                   │ → funnel-prune (correlation-diverse, venue-separate) │      slate
+                   └─────────────────────────────────────────────────────┘       │
+                                                                                  ▼
+                 ┌──────────── Analysts (parallel, by ROLE) ───┐
   candidates ──► │ Fundamental · Technical · News-sent · Macro │ ──► Bull × Bear ──► Trader
                  └─────────────────────────────────────────────┘                      │
                                                                                        ▼
@@ -14,6 +19,8 @@ calls swapped for Scout tools and their execution swapped for Valet tools**.
 ```
 
 **Research mode stops at "Trader proposes."** Execution mode continues through the gates to the Valet.
+*(In breadth discovery, research mode stops at the ranked slate; the envoys are ALWAYS research-only,
+regardless of mode — only the main orchestrator thread ever executes.)*
 
 ---
 
@@ -28,8 +35,102 @@ calls swapped for Scout tools and their execution swapped for Valet tools**.
   the `0.0` as a clean breaker. The `vix` leg is **equities-only**: for a crypto-only decision pass
   `vix: null` (do NOT feed DVOL/Fear-&-Greed into the `vix` slot — they have different scales and will
   mis-trip it); use `crypto_implied_vol`/`crypto_fear_greed` as qualitative pre-mortem context instead.
-- Candidates: `market_movers` / `crypto_movers`, `etf_holdings`, `retail_buzz` / `crypto_buzz`,
-  `filing_search`, `news_search`. (No `screen`/`peers` exist.)
+- Candidates (**narrow / seeded requests only** — a single name, a named sector, or a user-supplied
+  list): `market_movers` / `crypto_movers`, `etf_holdings`, `retail_buzz` / `crypto_buzz`,
+  `filing_search`, `news_search`. (No `screen`/`peers` exist.) **For a BROAD discovery request do NOT
+  use this thin sweep** — it draws one lens (mostly `market_movers`, whose daily gainers/losers are
+  themselves correlated) and yields a correlated shortlist; use **Stage B** below instead.
+
+## Stage B — Breadth discovery (manager fan-out by market AREA)
+
+**Only for a class-2 broad-discovery request.** This is the candidate ENGINE that feeds Stage 1 — it
+*precedes* the depth pipeline, it does not replace it. Skip it entirely for a single-name or seeded
+request (use the Stage 0 narrow line). Here you act as the **manager of a research team**, not as an
+analyst: you decide who looks where, then prune what they bring back.
+
+**B0 — Manager macro-read.** From the Stage 0 regime read (`macro_context`, `sector_performance`/
+`crypto_sectors`, `news_search(theme)`, `crypto_macro`/`crypto_fear_greed`) write a **one-line regime
+statement** (e.g. "rates higher-for-longer, VIX ~14 calm, crypto risk-on under BTC dominance"). This
+line is INPUT to the partition and is pasted into every envoy dispatch so envoys hunt *for this regime*,
+not in a vacuum.
+
+**B1 — Partition the market into coverage AREAS (regime-informed).** Carve the universe into **disjoint**
+areas spanning **US equities/ETFs + crypto spot** (the default universe). Mix the axes — don't just list
+GICS sectors:
+- by **sector** (tech, energy, financials, healthcare, industrials, staples/defensives, …)
+- by **theme** (AI/datacenter, rate-sensitives, reshoring, GLP-1, power/uranium, …)
+- by **style/factor** (quality compounders, deep-value/turnarounds, high-momentum, dividend/defensive)
+- by **asset class** (crypto majors BTC/ETH; crypto themes — L1/L2, DeFi, stablecoin/RWA)
+
+Bias the partition toward where the regime says edge lives, but **always include ≥1 contrarian/defensive
+area and ≥1 crypto area** so the slate cannot collapse into one risk-on cluster (this, with B4, is the
+direct fix for "3 of the same bet"). Areas must be **mutually exclusive** — give each envoy an explicit
+boundary ("you own ENERGY: large-cap E&P, oil services, refiners; do NOT cover utilities or uranium —
+that's the Power envoy"). An unavoidable cross-area name (an ETF, a conglomerate) is resolved at the B4
+merge, never by overlapping mandates.
+
+**B2 — Team-size scaling (your call as manager).** Match the envoy count to the request's breadth:
+- **Light (3-4)** — "any ideas?", a quick look. Broad buckets: equity-cyclical · equity-defensive/
+  secular · crypto.
+- **Balanced (5-6, DEFAULT for "bring me recommendations")** — finer sector/theme split + a style
+  envoy + 1-2 crypto envoys.
+- **Exhaustive (8+)** — "sweep everything". Full sector ladder + style factors + crypto-sector split +
+  macro-theme envoys.
+
+Run all envoys for a tier in **ONE parallel batch** (a single message, multiple Agent calls). Never
+chain them serially — that is the token/latency blow-up.
+
+**B3 — Envoy dispatch (one subagent per area).** Spawn each envoy as the **`vizier-research-envoy`**
+agent type when installed — its frontmatter withholds the Valet execution tools, so the envoy *cannot*
+trade (the hard firewall). If that type is not installed, spawn a standard subagent and, in the dispatch,
+grant only Scout research tools and **never mention the Valet tools** (the soft layer; "only the
+orchestrator executes" still holds either way). Dispatch prompt seed:
+
+> "You are a **research envoy** for coverage area **{area}** (venue scope: {ibkr equities/ETFs | crypto
+> spot | both}). **Mandate: RESEARCH ONLY — you surface candidates, you do not trade.** Current regime:
+> {regime line from B0}. Using **Scout tools only** (`market_movers`/`crypto_movers`, `sector_performance`/
+> `crypto_sectors`, `etf_holdings`, `retail_buzz`/`crypto_buzz`, `news_search`, `filing_search`, and a
+> LIGHT `company_dossier`/`crypto_dossier` peek), find the **2-4 most compelling LONG candidates in YOUR
+> area for THIS regime**. This is a FIRST-PASS scan, NOT a deep dive (analysts handle depth later) — give
+> a tight, cited case, don't exhaust every tool. **Stay strictly inside {area}.** If your area has no real
+> edge right now, say so and return fewer (or none) — do not pad. Return each candidate as the row below,
+> every figure tagged with its `as_of`."
+
+**Structured candidate row (each envoy returns a list of these):**
+```
+- ticker:      canonical symbol (crypto BASE/QUOTE, e.g. BTC/USDT)
+- area:        the coverage area (lets the manager track diversification)
+- venue:       ibkr | crypto
+- case:        one-line long thesis
+- key_risk:    the single biggest hole / what breaks it
+- conviction:  rough 1-5 FIRST-PASS (NOT the Stage 3 conviction — pre-deep-dive)
+- evidence:    2-3 figures/signals, EACH with as_of
+```
+
+**B4 — Dedup / merge / funnel-prune (manager judgment — no new core command).** Collapse the envoy
+returns into one slate, then prune:
+1. **Dedup** — same ticker from two envoys → one row, keep the stronger case, note it surfaced in
+   multiple areas (a mild positive, not a conviction multiplier).
+2. **Score & cut the weak** — rank by potential × risk/reward (qualitative, per Stage 5's "your
+   qualitative judgment"). Drop regime-mismatched and thin-evidence names.
+3. **Correlation-based diversification — THE fix.** Run `correlation_matrix` on the surviving **equity**
+   shortlist and `crypto_correlation_matrix` on the **crypto** shortlist. Where two survivors are highly
+   correlated, **keep the higher-conviction one and backfill from a lower-correlation candidate still on
+   the slate**. Target: survivors span areas AND are not mutually correlated. There is **no cross-venue
+   matrix** — for equity↔crypto co-movement apply a qualitative risk-on/off judgment (high-beta tech and
+   BTC move together in risk-on) and flag it; never invent a number.
+4. **Venue separation.** Rank the combined slate by merit for the RECOMMENDATION order, but keep risk
+   per venue: when a budget exists, size each venue's legs against **that venue's own NAV** via a
+   separate `allocate` call — never compare an IBKR size to a crypto one under one denominator, never
+   report a single blended cross-venue exposure.
+5. **Funnel cap.** Hand only the best few survivors to Stage 1 (default ~3-5, or exactly the N the user
+   asked to invest in, +1-2 spare so the gates have room to drop one). This hard cap is what keeps the
+   EXPENSIVE depth pipeline from running on dozens of names.
+
+**B5 — Handoff.** The surviving slate IS the `candidates` arrow into Stage 1. From here the pipeline is
+unchanged: each survivor runs Analysts → Bull×Bear → Trader → (execution mode) data-sufficiency → Risk/PM
+→ pre-mortem → Stage 7. Research mode stops at the ranked slate + per-name Trader proposals; execution
+mode continues through the gates **on the main thread only**.
 
 ## Stage 1 — Analysts (fan out in parallel, one subagent each)
 
