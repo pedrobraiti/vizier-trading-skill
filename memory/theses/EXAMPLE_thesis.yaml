@@ -1,0 +1,55 @@
+# EXAMPLE thesis — SAFE FAKE DATA, committed to document the schema.
+# Real theses are `{ticker}-{open_date}.yaml` and are gitignored (never public).
+# This is what the skill writes on every buy (spec, §F). The baseline_snapshot
+# is the critical part: it freezes the quantitative signals at buy time so the
+# thesis-check can diff against them — the Scout's `as_of` cannot reconstruct
+# soft signals (news/analyst/ownership/IV/buzz) or historical multiples.
+
+ticker: ACME                 # crypto would be CCXT BASE/QUOTE, e.g. BTC/USDT
+horizon_tag: core            # core (long-term) | tactical (short-term)
+open_date: "2026-01-15"
+entry_price: 142.30
+qty: 7                       # REQUIRED: base/share quantity actually filled (read
+                             # filled_quantity / crypto order_status post-fill).
+                             # tranche accounting sums this -> it must not be null.
+cash_qty: null              # USD deployed when bought by value (cashQty); else null
+conviction: 4                # 1-5 rubric (5 = fully confirmed, datado catalyst, no red flag)
+thesis_one_liner: "Quality compounder re-rating after margin inflection."
+reason: >
+  Operating margin inflected for the third straight quarter while the multiple
+  still prices the old cost structure. Net cash, owner-operator, buying back stock.
+catalyst: "Q1 earnings — guidance raise expected on the new product line."
+catalyst_date: "2026-04-22"
+main_risk: "Demand is macro-sensitive; a consumer slowdown delays the re-rating."
+review_trigger:
+  type: price                # price | date | fundamental
+  value: 120.00              # for a hard stop this is the stop price
+review_trigger_is_hard_stop: true   # true -> becomes a stop order at the Valet (stocks)
+                                     # / a soft monitored trigger (crypto spot)
+baseline_snapshot:
+  price: 142.30
+  pe: 21.4
+  forward_pe: 18.9
+  ev_ebitda: 13.2
+  ps: 4.1
+  revenue_growth_yoy: 0.18
+  gross_margin: 0.61
+  net_cash: true
+  rsi_14: 58
+  sma_50: 135.10
+  sma_200: 121.40
+  vix: 16.2
+  ten_year_yield: 0.041
+  analyst_consensus: "buy"
+  analyst_price_target: 168.00
+  insider_ownership_pct: 12.5
+  catalyst_date: "2026-04-22"
+status: open                 # open | closed
+last_reviewed: "2026-01-15"
+
+# On close the skill appends (spec, §F):
+# close_date: "2026-05-02"
+# exit_price: 171.20
+# realized_pnl: 202.30
+# alpha_vs_spy: 0.084
+# lesson: "Margin-inflection theses re-rate on the first guidance confirmation."

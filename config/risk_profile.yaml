@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VIZIER — risk policy (the brain's portfolio judgment layer)
+#
+# This is the ONE file Pedro edits to retune risk. It is plain config, never
+# hardcoded logic. Two ways to use it:
+#
+#   1. Switch profile wholesale  → change `active_profile` below.
+#   2. Tweak a single number      → edit that one field inside a profile.
+#
+# Every limit is a PERCENT OF NAV (net liquidation), not USD. `25` means 25%.
+# Percent-of-NAV is venue/size agnostic: it works the same on a $100 account or
+# a $100k one, because the Valet executes fractions via cashQty. NAV is the
+# denominator for position limits and drawdown; free cash is the base for what
+# can actually be deployed in a round (see the spec, §E "denominator").
+#
+# Limits are PER ACCOUNT / PER VENUE — never mix an IBKR NAV with a crypto-
+# exchange NAV under one denominator (spec, crypto section). The skill loads the
+# right NAV per venue and passes it in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Which profile is live. Flip this single line to change the whole risk posture.
+# One of: conservative | moderate | aggressive
+active_profile: aggressive
+
+# Global rank floor: candidates scoring below this conviction (1-5) are skipped
+# during sizing UNLESS the user gave an explicit order for that exact ticker
+# (spec, §E "piso de convicção"). Applies across every profile.
+conviction_floor: 2
+
+profiles:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # CONSERVATIVE — capital preservation first. Wide diversification, fat cash
+  # cushion, breaker trips early, autonomy deploys tiny slices. (Chosen sane
+  # defaults — tighter than aggressive across the board.)
+  # ───────────────────────────────────────────────────────────────────────────
+  conservative:
+    max_pct_per_asset: 10      # no single name above 10% of NAV
+    max_pct_per_sector: 25     # no single sector above 25% of NAV
+    min_cash_pct: 20           # always keep >=20% of NAV in cash
+    max_positions: 15          # broad book, many small positions
+    circuit_breaker:
+      vix_threshold: 28        # VIX above this -> stop adding risk without asking
+      monthly_drawdown_pct: 10 # portfolio down >10% on the month -> same
+    autonomy:
+      per_run_pct: 10          # <=10% of NAV mobilized in a single autonomous run
+      per_run_max_trades: 2    # ...or <=2 trades per run, whichever binds first
+      daily_cumulative_pct: 20 # <=20% of START-OF-DAY NAV across a rolling 24h
+      daily_max_trades: 4      # <=4 autonomous trades across a rolling 24h
+      drawdown_kill_pct: 8     # drawdown since loop start >=8% -> disarm autonomy
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # MODERATE — balanced. (Chosen sane defaults, between the two extremes.)
+  # ───────────────────────────────────────────────────────────────────────────
+  moderate:
+    max_pct_per_asset: 15
+    max_pct_per_sector: 30
+    min_cash_pct: 10
+    max_positions: 12
+    circuit_breaker:
+      vix_threshold: 33
+      monthly_drawdown_pct: 14
+    autonomy:
+      per_run_pct: 20
+      per_run_max_trades: 3
+      daily_cumulative_pct: 35
+      daily_max_trades: 8
+      drawdown_kill_pct: 12
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # AGGRESSIVE — Pedro's default. Concentrated, thin cash cushion, breaker only
+  # on real panic. Values come straight from the spec (§ "Risco e persistência"
+  # + §F "Defaults concretos"): 25% / 40% / 5% cash / ~8 positions /
+  # VIX>38 or monthly drawdown>18% / autonomy <=33% NAV or <=5 trades per run
+  # plus <=50% NAV per day.
+  # ───────────────────────────────────────────────────────────────────────────
+  aggressive:
+    max_pct_per_asset: 25      # SPEC
+    max_pct_per_sector: 40     # SPEC
+    min_cash_pct: 5            # SPEC
+    max_positions: 8           # SPEC (~8, concentrated)
+    circuit_breaker:
+      vix_threshold: 38        # SPEC
+      monthly_drawdown_pct: 18 # SPEC
+    autonomy:
+      per_run_pct: 33          # SPEC: <=33% of NAV per run
+      per_run_max_trades: 5    # SPEC: ...or <=5 trades per run
+      daily_cumulative_pct: 50 # SPEC: <=50% of start-of-day NAV per 24h window
+      daily_max_trades: 12     # CHOSEN: rolling-24h trade ceiling (2nd backstop;
+                               # the spec fixes the daily VALUE ceiling at 50%
+                               # but not a daily trade count — see report)
+      drawdown_kill_pct: 15    # CHOSEN: spec leaves the kill % open ("passar de X%")

@@ -1,0 +1,37 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Node / misc
+node_modules/
+.DS_Store
+
+# Secrets
+.env
+
+# Internal project memory & the LOCAL-ONLY design spec — kept on disk for dev
+# continuity but NEVER public (internal narrative; SPEC-origin is marked LOCAL ONLY).
+# Mirrors how the sibling MCPs keep .claude/ local.
+.claude/
+docs/SPEC-origin.md
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VIZIER private runtime state — REAL positions/theses/decisions. NEVER public.
+# Only templates/examples (EXAMPLE_*, *.template, .gitkeep) are committed.
+# ─────────────────────────────────────────────────────────────────────────────
+/memory/theses/*.yaml
+/memory/theses/*.yml
+/memory/*.jsonl
+/memory/nav_snapshots*
+/memory/autonomy_state.json
+/memory/state/
+!/memory/**/.gitkeep
+!/memory/**/EXAMPLE_*
+!/memory/**/*.template
