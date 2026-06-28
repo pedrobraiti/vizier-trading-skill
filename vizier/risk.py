@@ -248,8 +248,8 @@ def allocate_across_candidates(
     """
     if nav <= 0:
         raise ValueError("nav must be positive")
-    if total_amount < 0:
-        raise ValueError("total_amount must be non-negative")
+    if not math.isfinite(total_amount) or total_amount < 0:
+        raise ValueError("total_amount must be non-negative and finite")
     # Validate the weighting mode UP FRONT — regardless of whether per-candidate
     # weights are present — so a garbage value ("momentum") fails loudly instead
     # of being silently ignored on the explicit-weights path.
@@ -259,10 +259,13 @@ def allocate_across_candidates(
     # per-candidate weight/conviction here, the same way negative total_amount and
     # nav<=0 are rejected above. Zero is allowed (it simply gets nothing).
     for candidate in candidates:
-        if "weight" in candidate and float(candidate["weight"]) < 0:
-            raise ValueError("weight must be non-negative")
-        if float(candidate.get("conviction", 0)) < 0:
-            raise ValueError("conviction must be non-negative")
+        if "weight" in candidate:
+            weight_value = float(candidate["weight"])
+            if not math.isfinite(weight_value) or weight_value < 0:
+                raise ValueError("weight must be non-negative and finite")
+        conviction_value = float(candidate.get("conviction", 0))
+        if not math.isfinite(conviction_value) or conviction_value < 0:
+            raise ValueError("conviction must be non-negative and finite")
 
     eligible = [
         c for c in candidates if _candidate_is_eligible(c, profile, explicit_order=explicit_order)
@@ -274,6 +277,15 @@ def allocate_across_candidates(
     ]
 
     weights, weight_sum = _allocation_weights(eligible, weighting)
+    # An explicit positive budget is a CONTRACT: it must deploy. If the chosen basis is
+    # degenerate (all weights/convictions zero -> weight_sum 0), an even split is the
+    # faithful recovery — deploy what the user asked rather than silently leaving the
+    # whole amount unallocated. Flagged so the recovery is never silent.
+    weight_fallback = False
+    if total_amount > 0 and eligible and weight_sum <= 0:
+        weights = [1.0 for _ in eligible]
+        weight_sum = float(len(eligible))
+        weight_fallback = True
     cap = _asset_cap(nav, profile)
 
     allocations: list[dict[str, Any]] = []
@@ -305,6 +317,7 @@ def allocate_across_candidates(
         "unallocated": max(0.0, total_amount - allocated_total),
         "asset_cap": cap,
         "allow_over_cap": allow_over_cap,
+        "weight_fallback": weight_fallback,
         "weighting": "explicit" if any("weight" in c for c in eligible) else weighting,
     }
 

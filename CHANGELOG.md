@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-06-28
+
+### Fixed
+- **`allocate` honored an explicit positive budget faithfully even when the split basis is degenerate.**
+  Found in adversarial QA: all-zero convictions (or all-zero explicit weights) made `weight_sum == 0`,
+  so every leg sized to `0` and the whole amount landed in `unallocated` with `ok:true` — a silent
+  contract break (deployed total ≠ the amount the user asked for). It now falls back to an even split
+  and flags `weight_fallback: true` so the recovery is never silent. Non-finite `total_amount`/`weight`/
+  `conviction` (NaN/inf) are now rejected up front alongside the existing negative-value guards.
+
 ## [0.2.0] - 2026-06-28
 
 Everything that landed since the first build, plus a deliberate sharpening of the product's posture from

@@ -246,6 +246,39 @@ def test_allocate_negative_conviction_rejected(profile):
         )
 
 
+def test_allocate_degenerate_weights_fall_back_to_even_split_not_silent_zero(profile):
+    # An explicit positive budget is a contract: if the split basis is degenerate
+    # (all convictions/weights zero -> weight_sum 0), deploy the full amount evenly
+    # instead of silently leaving it all unallocated. Flagged via weight_fallback.
+    result = risk.allocate_across_candidates(
+        1_000,
+        [{"ticker": "AAA", "conviction": 0}, {"ticker": "BBB", "conviction": 0}],
+        nav=100_000,
+        profile=profile,
+        explicit_order=True,
+    )
+    assert result["weight_fallback"] is True
+    assert result["allocated_total"] == pytest.approx(1_000.0)
+    assert result["unallocated"] == pytest.approx(0.0)
+    by_ticker = {a["ticker"]: a["size"] for a in result["allocations"]}
+    assert by_ticker["AAA"] == pytest.approx(500.0)
+    assert by_ticker["BBB"] == pytest.approx(500.0)
+
+
+def test_allocate_rejects_non_finite_amount_and_weight(profile):
+    with pytest.raises(ValueError, match="total_amount must be non-negative"):
+        risk.allocate_across_candidates(
+            float("inf"), [{"ticker": "AAA", "conviction": 3}], nav=100_000, profile=profile
+        )
+    with pytest.raises(ValueError, match="weight must be non-negative"):
+        risk.allocate_across_candidates(
+            100,
+            [{"ticker": "AAA", "conviction": 3, "weight": float("nan")}],
+            nav=100_000,
+            profile=profile,
+        )
+
+
 def test_allocate_zero_weight_is_allowed_and_gets_nothing(profile):
     # Zero weight is valid (not negative): the leg simply receives nothing.
     result = risk.allocate_across_candidates(
