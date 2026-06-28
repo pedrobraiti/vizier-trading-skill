@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-06-28
+
+### Fixed
+- **`allocate` now rejects a non-finite `nav`** (`inf`/`nan`) alongside the existing `nav <= 0` guard,
+  for symmetry with the finiteness checks added to `total_amount`/`weight`/`conviction` in 0.2.1. A
+  non-finite NAV would otherwise yield a non-finite per-asset cap and silently disable the cap signal.
+
 ## [0.2.1] - 2026-06-28
 
 ### Fixed

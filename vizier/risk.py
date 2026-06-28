@@ -246,7 +246,7 @@ def allocate_across_candidates(
     Each candidate dict needs at least ``ticker`` and ``conviction``; optional
     ``explicit`` (bool) and ``weight`` (float) per leg.
     """
-    if nav <= 0:
+    if not math.isfinite(nav) or nav <= 0:
         raise ValueError("nav must be positive")
     if not math.isfinite(total_amount) or total_amount < 0:
         raise ValueError("total_amount must be non-negative and finite")

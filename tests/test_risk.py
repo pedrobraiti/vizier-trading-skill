@@ -270,6 +270,10 @@ def test_allocate_rejects_non_finite_amount_and_weight(profile):
         risk.allocate_across_candidates(
             float("inf"), [{"ticker": "AAA", "conviction": 3}], nav=100_000, profile=profile
         )
+    with pytest.raises(ValueError, match="nav must be positive"):
+        risk.allocate_across_candidates(
+            100, [{"ticker": "AAA", "conviction": 3}], nav=float("nan"), profile=profile
+        )
     with pytest.raises(ValueError, match="weight must be non-negative"):
         risk.allocate_across_candidates(
             100,
