@@ -4,6 +4,18 @@ Autonomy is the dangerous mode. It is **opt-in only** (the user explicitly says 
 asking"), and arming it is a checklist, not a vibe. The deterministic core (`python -m vizier`) holds
 the math; this file is the order in which you call it and the Valet, and the rules around it.
 
+> **What these guards are for, and how binding they actually are (be precise).** The §B ceilings and the
+> drawdown-kill exist to **catch the ROBOT going haywire while no human is watching** — they are a
+> failure-prevention backstop for armed, unattended autonomy, **not** a brake on a human's confirmed
+> explicit order. They never apply to the confirmation path; do not let them clamp or second-guess a named
+> human order. And on bindingness, don't overstate it: Vizier's ceilings + drawdown-kill are
+> **advisory/bookkeeping — they only bind if the skill actually CALLS `autonomy-gate` each candidate and
+> feeds it an honest live NAV.** The arithmetic is exact and self-latching in code, but nothing in Vizier
+> can physically stop an order the LLM never routed through the gate. The **one hard, code-enforced dollar
+> backstop is the Valet's `MAX_DAILY_VALUE`** (rejected at the executor regardless of what the skill does)
+> — which is exactly why arming is FORBIDDEN until it is set. Treat Vizier's gate as the disciplined
+> bookkeeper and the Valet env caps as the hard floor under it.
+
 > **Why this exists:** the per-run cap alone does NOT stop a loop from draining the account — each round
 > mobilizes a fresh slice of what's left. So there are TWO ceilings, both code-enforced from the
 > decision log and both anchored to the SAME FIXED start-of-day baseline:

@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
-  <img src="https://img.shields.io/badge/core-105%20tests-brightgreen" alt="105 tests">
+  <img src="https://img.shields.io/badge/core-117%20tests-brightgreen" alt="117 tests">
   <img src="https://img.shields.io/badge/posture-paper--first-orange" alt="Posture: paper-first">
 </p>
 
@@ -103,8 +103,13 @@ journals the thesis and the fills.
 
 ## The safety model (code-enforced, fail-closed)
 
-The money-safety rules are not prose the model is asked to remember — they are deterministic checks that
-**fail closed**. The dangerous mode (autonomy) is guarded by four composed legs plus a re-arm guard:
+The money-safety rules are not prose the model is asked to remember — they are deterministic checks with
+exact, self-latching arithmetic. A precise word on bindingness: these checks are **advisory/bookkeeping
+that bind when the skill calls them** each candidate with an honest live NAV — Vizier holds no order pipe of
+its own, so the one **hard, code-enforced dollar backstop is the Valet's `MAX_DAILY_VALUE`** (enforced at
+the executor no matter what the skill does), which is why arming autonomy is forbidden until it is set. The
+dangerous mode (autonomy) is guarded by four composed legs plus a re-arm guard — a backstop for the **robot
+running unattended**, never a clamp on a human's confirmed explicit order:
 
 - **Cumulative daily ceiling** — at most a configured % of the **fixed start-of-day NAV** (50% on the
   aggressive profile) can be deployed across a rolling 24h window, sourced from the persistent decision log
@@ -112,8 +117,10 @@ The money-safety rules are not prose the model is asked to remember — they are
   drain fix (a per-round cap alone does *not* stop a loop from emptying the account).
 - **Per-run ceiling** — a single autonomous round is capped at a smaller % (33%) or a max trade count,
   anchored to the same fixed baseline; it resets each round.
-- **Drawdown kill** — if NAV falls past a kill threshold from the day baseline, autonomy disarms and
-  requires a deliberate manual re-arm.
+- **Drawdown kill** — if NAV falls past a kill threshold from the day baseline, the gate **latches** the
+  kill and hard-blocks every further candidate (even if NAV recovers); the skill then disarms and a
+  deliberate manual re-arm is required. (The latch is code; the disarm action is the skill obeying the
+  block — the gate does not auto-disarm for you.)
 - **Re-arm guard** — `arm-autonomy` **refuses** while a window is still active (re-arming would reset the
   baseline and wipe the day's spend — a drain vector); a legitimate re-arm requires an explicit disarm or
   window expiry. No force-override.
@@ -258,7 +265,7 @@ the horizon, the quantitative baseline to diff against. That state is **private*
 ## Development
 
 ```bash
-pytest -q          # 105 offline tests (deterministic, no network, no real git)
+pytest -q          # 117 offline tests (deterministic, no network, no real git)
 ruff check .       # lint
 ```
 

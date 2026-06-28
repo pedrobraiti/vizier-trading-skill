@@ -97,7 +97,39 @@ def test_allocate_respects_per_asset_cap(profile):
     for leg in result["allocations"]:
         assert leg["size"] <= 25.0 + 1e-9
         assert leg["capped"] is True
+        assert leg["over_cap"] is True
     assert result["unallocated"] == pytest.approx(50.0)
+
+
+def test_allocate_allow_over_cap_honors_full_explicit_amount(profile):
+    # The faithful-execution contract: an explicit dollar amount, confirmed once,
+    # deploys IN FULL instead of being silently shaved to the per-asset cap. Each
+    # over-cap leg is flagged (over_cap) for honest disclosure, but nothing is left
+    # unallocated and the leg is NOT marked `capped` (it was not shaved).
+    candidates = [
+        {"ticker": "AAA", "conviction": 5},
+        {"ticker": "BBB", "conviction": 5},
+    ]
+    result = risk.allocate_across_candidates(
+        100, candidates, nav=100, profile=profile, allow_over_cap=True
+    )
+    for leg in result["allocations"]:
+        assert leg["size"] == pytest.approx(50.0)
+        assert leg["capped"] is False  # honored in full, not shaved
+        assert leg["over_cap"] is True  # but disclosed as over the per-asset cap
+    assert result["allocated_total"] == pytest.approx(100.0)
+    assert result["unallocated"] == pytest.approx(0.0)
+    assert result["allow_over_cap"] is True
+
+
+def test_allocate_default_still_shaves_over_cap_legs(profile):
+    # allow_over_cap defaults False: Vizier-CHOSEN sizing must still respect the cap.
+    candidates = [{"ticker": "AAA", "conviction": 5}]
+    result = risk.allocate_across_candidates(100, [*candidates], nav=100, profile=profile)
+    leg = result["allocations"][0]
+    assert leg["size"] == pytest.approx(25.0)
+    assert leg["capped"] is True
+    assert result["allow_over_cap"] is False
 
 
 def test_allocate_drops_below_floor_unless_explicit(profile):

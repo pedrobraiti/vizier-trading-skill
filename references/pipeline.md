@@ -30,6 +30,18 @@ contract. See Stage 4 and B4 step 5.)*
 
 ## Stage 0 — regime & candidates (before the per-name deep dive)
 
+**Stage 0a — portfolio-aware brake (REQUIRED for any autonomous, vague, or manager/breadth flow).** Before
+proposing a single trade in a flow where *Vizier* chose to act (not a human's explicit named order), you
+MUST pull the live book first — Valet `portfolio` + `positions` + `account_summary` (and `reconcile` for
+in-flight orders), per venue — and reason **explicitly over it**: given what's already held, the
+diversification, the cash on hand and the existing theses, is this new trade actually additive, or is the
+right move to do **nothing / less**? This portfolio-aware judgment IS the overtrading defense — there is no
+"max N trades" cap doing that job for a human at the wheel; the brake is this reasoning. "No edge / nothing
+worth doing — holding" is a complete, first-class outcome. Skip this only for a direct explicit named order
+(there the user already decided). The numeric §B ceilings are a *separate* unattended-robot backstop, not
+this brake.
+
+
 - Regime: `macro_context` (rates, VIX), `sector_performance` / `crypto_sectors`, `news_search(theme)`,
   `crypto_macro` / `crypto_fear_greed` for crypto. Check the **circuit breaker** here:
   `python -m vizier drawdown --json '{"window_days":30}'` returns `current_drawdown_pct` (running-peak-to-
@@ -170,9 +182,12 @@ returns into one slate, then prune:
      it. Announce the cost first ("10 names = a deep dive each, ~Nx the work — going ahead"), and for a
      large count you may **tier the depth** (full Analyst→Bull×Bear→pre-mortem on the strongest cluster,
      a lighter first-pass-plus read on the tail) rather than skimping all of them equally.
-   - **Execution mode keeps the ≤~6 money-bearing cap.** Researching 10 to recommend is fine; putting
-     real money into more than ~6 names in a single pass is a concentration/cost guard and is NOT
-     overridden by a research count — if the user wants money in more, confirm that explicitly.
+   - **Execution mode — judgment, not a hard cap.** When *Vizier* is choosing how many names to fund in a
+     self-directed pass, ~6 is a sensible diversification/cost ceiling on its own discretion (rank, fund
+     the best, mention the rest). But this is **not** a "max N trades" rule binding the user: an **explicit
+     user list** ("buy these 8") is explicit intent — honor it faithfully, raising the single concentration
+     caution ONCE if funding that many in one pass is genuinely a concern, then comply. A research-only
+     count never auto-converts into money; that still takes the user's explicit go-ahead.
 
 **B5 — Handoff.** The surviving slate IS the `candidates` arrow into Stage 1. From here the pipeline is
 unchanged: each survivor runs Analysts → Bull×Bear → Trader → (execution mode) data-sufficiency → Risk/PM
@@ -231,8 +246,15 @@ mode ends here** — present long & short reads, mark divergence, and stop.
 python -m vizier data-sufficiency --json '{"scout_responses": {"price":..., "pe":..., "sector":...}, "decision_type": "valuation"}'
 ```
 (The multiple key may be `pe` or Scout's native `pe_ratio` — the gate accepts both.)
-`abstain` → don't size (even under an explicit order — say so honestly). `downsize` → cut conviction/
-size. `proceed` → continue.
+`abstain` → don't size. `downsize` → cut conviction/size. `proceed` → continue. **These verdicts steer
+VIZIER-CHOSEN sizing** (a vague, skill-derived or autonomous amount you picked).
+
+**An explicit named dollar amount is a CONTRACT — here the gate ANNOTATES, it does not gate-out.** When the
+user said "buy $N of TICKER" there is no number for the gate to protect (a `cash_amount` market order needs
+no price), so an `abstain`/`downsize` becomes an honest caveat on the thesis ("thin data, low confidence")
+and you still **execute the user's amount** — the same annotate-don't-prune rule as the read-only count.
+The only thing that stops an explicit order is a suspected misparse (the units/typo confirm), never thin
+data. Say the data is thin, then comply.
 
 **In read-only research/recommendation mode this gate ANNOTATES, it does not gate-out.** Run it to grade a
 name's conviction/quality — an `abstain`/`downsize` becomes an honest caveat on the name ("couldn't fully
@@ -279,10 +301,17 @@ ask for** (each type has its own minimum; relabelling thin data to a cheaper typ
     cap still binds in every mode — never hand-weight to dodge it.
 - Limits: `python -m vizier limits --json '{"portfolio":{"nav":..,"cash":..,"positions":[...]}, "candidate":{"ticker":..,"value":..,"sector":..}}'`.
   (For a CURRENT over-weight scan, call it with `"value": 0` per held ticker/sector — see the rebalance
-  rule in SKILL.md.) If a leg violates max-position/sector/min-cash or collides with max-%/asset on a
-  small account (Tension C): **downsize/drop a leg and confirm ONCE**, explaining the conflict — never
-  breach a limit silently, never freeze the request. To get the compliant size, re-run `size`/`allocate`
-  (which apply the cap) rather than back-solving the number by hand.
+  rule in SKILL.md.) A leg that violates max-position/sector/min-cash or collides with max-%/asset on a
+  small account (Tension C) is handled by **who chose the size**:
+  - **Vizier-chosen size** (vague/skill-derived/autonomous): **downsize/drop the leg** to fit, confirming
+    ONCE and explaining the conflict — never breach a limit silently, never freeze the request. To get the
+    compliant size, re-run `size`/`allocate` (which apply the cap) rather than back-solving by hand.
+  - **An explicit named amount** (the user set the dollars): the cap is a **single caution, not a clamp**.
+    Surface the breach once ("$100 across these 2 puts AAA at 31% of NAV, over your 25% per-asset cap — go
+    ahead, or keep it within the cap?") and **comply with the answer** — on a yes, re-run `allocate` with
+    `"allow_over_cap": true` to deploy the full amount (the `over_cap` legs are disclosed, not shaved).
+    Never silently downsize a human's confirmed explicit order. Under **armed autonomy** the cap binds hard
+    (no human backstop) — there it is a real ceiling, not a caution.
 - Correlation with the current book: `correlation_matrix` / `classify` / `compare` — avoid stacking the
   same bet.
 - Tie-breaking among candidates is **your qualitative judgment** (risk/reward, lowest correlation,

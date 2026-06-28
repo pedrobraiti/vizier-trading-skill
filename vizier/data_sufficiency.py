@@ -3,9 +3,19 @@
 The Scout can return ``{ok: true}`` with null fields when a source is
 rate-limited — to the skill that looks like "good data". This gate sits between
 the analysts and the risk gate: it defines a MINIMUM evidence set per decision
-type and, when the minimum is missing, forces a downsize or an abstain — EVEN
-under an explicit order. Honesty extends to "I cannot size this responsibly,
-the data isn't there" (spec, §10 + §B).
+type and returns a verdict (``proceed`` / ``downsize`` / ``abstain``).
+
+This function is a pure ANNOTATOR — it grades evidence, it does not execute
+anything. How the skill ACTS on the verdict depends on who chose the size:
+  * VIZIER-chosen sizing (a vague, skill-derived or autonomous amount) → the
+    verdict steers it: thin data downsizes or abstains ("I cannot size this
+    responsibly, the data isn't there"). Abstaining is honest, not a failure.
+  * An EXPLICIT named dollar amount (or a read-only recommendation count) is a
+    CONTRACT — there the verdict only ANNOTATES (an honest "thin data" caveat)
+    and the skill still honors the user's amount/count. A ``cash_amount`` market
+    order needs no price, so there is nothing for the gate to gate-out; only a
+    suspected misparse stops it, never thin data (spec, §10 + the faithful-
+    execution posture in SKILL.md).
 
 Expected input shape: ``scout_responses`` is a flat dict of signal name → value
 that the skill has already extracted from the Scout envelopes (so a null field

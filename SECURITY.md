@@ -22,7 +22,11 @@ only `EXAMPLE_*`, `README.md` and `.gitkeep`.
 - Vizier is **paper-first / shadow-mode by default**. Real-money autonomy is the last rung of a deliberate
   ladder (shadow → paper/testnet → live read-only → real money) and is gated.
 - The money-safety rules (cumulative + per-run ceilings on a fixed daily baseline, drawdown kill, re-arm
-  guard) are **code-enforced and fail closed**. Do not relocate them into prompt text.
+  guard) are **exact, self-latching arithmetic in code** — keep them there, never relocate them into prompt
+  text. They are **advisory in the sense that they bind only when the skill calls `autonomy-gate`** each
+  candidate with an honest live NAV (Vizier owns no order pipe); the one **hard, executor-enforced dollar
+  backstop is the Valet's `MAX_DAILY_VALUE`**, which is why arming autonomy is forbidden until it is set.
+  These guards govern **armed, unattended autonomy** — they are not a clamp on a human's confirmed order.
 - Always assert the session's `account_type` (`PAPER`/`LIVE`) before an order; trust the account, never the
   config label.
 

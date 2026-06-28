@@ -62,6 +62,7 @@ def _cmd_allocate(payload: dict[str, Any], args: argparse.Namespace) -> Any:
         profile=_profile(args),
         explicit_order=payload.get("explicit_order", False),
         weighting=payload.get("weighting", "conviction"),
+        allow_over_cap=payload.get("allow_over_cap", False),
     )
 
 

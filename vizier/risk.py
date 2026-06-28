@@ -214,6 +214,7 @@ def allocate_across_candidates(
     *,
     explicit_order: bool = False,
     weighting: str = "conviction",
+    allow_over_cap: bool = False,
 ) -> dict[str, Any]:
     """Split a fixed budget across candidates, then cap each leg at the per-asset
     NAV limit. Whatever the caps shave off is reported as ``unallocated`` rather
@@ -230,6 +231,17 @@ def allocate_across_candidates(
     is ``explicit_order`` OR that leg carries ``"explicit": true``. The per-candidate
     flag is what lets a MIXED request work — a user-named sub-floor leg is kept while
     skill-derived sub-floor legs in the same call are still dropped (spec, §10 + §E).
+
+    ``allow_over_cap`` (default False) is the faithful-execution escape hatch: a fixed
+    dollar amount the user named explicitly is a CONTRACT, just like a read-only
+    recommendation count is. By default the per-asset cap still shaves an over-cap leg
+    (Vizier-CHOSEN sizing must respect the limit). But when the user gives an explicit
+    dollar order that the cap would clamp, the skill warns ONCE (the single risk
+    caution) and, if the user confirms, re-runs with ``allow_over_cap=True`` — then the
+    full amount is deployed and each over-cap leg is flagged ``over_cap`` for honest
+    disclosure rather than silently left ``unallocated``. The limit is a caution to a
+    human at the wheel here, not a refusal (it regains teeth under armed autonomy,
+    where the human is not the backstop).
 
     Each candidate dict needs at least ``ticker`` and ``conviction``; optional
     ``explicit`` (bool) and ``weight`` (float) per leg.
@@ -269,7 +281,11 @@ def allocate_across_candidates(
     for c, raw_weight in zip(eligible, weights, strict=True):
         weight = (raw_weight / weight_sum) if weight_sum > 0 else 0.0
         target = total_amount * weight
-        size = min(target, cap)
+        over_cap = target > cap + LIMIT_EPSILON
+        # Default: shave an over-cap leg to the per-asset cap. allow_over_cap: deploy
+        # the full explicit amount (honored as a contract after a single confirm) and
+        # disclose the breach via ``over_cap`` instead of silently leaving it unallocated.
+        size = target if allow_over_cap else min(target, cap)
         allocated_total += size
         allocations.append(
             {
@@ -277,7 +293,8 @@ def allocate_across_candidates(
                 "conviction": c.get("conviction", 0),
                 "target": target,
                 "size": size,
-                "capped": target > cap + LIMIT_EPSILON,
+                "capped": size < target - LIMIT_EPSILON,  # was the leg actually shaved?
+                "over_cap": over_cap,  # did the target exceed the per-asset cap (risk signal)?
             }
         )
 
@@ -287,6 +304,7 @@ def allocate_across_candidates(
         "allocated_total": allocated_total,
         "unallocated": max(0.0, total_amount - allocated_total),
         "asset_cap": cap,
+        "allow_over_cap": allow_over_cap,
         "weighting": "explicit" if any("weight" in c for c in eligible) else weighting,
     }
 
