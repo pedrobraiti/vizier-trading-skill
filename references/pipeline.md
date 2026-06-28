@@ -39,6 +39,10 @@ contract. See Stage 4 and B4 step 5.)*
   the `0.0` as a clean breaker. The `vix` leg is **equities-only**: for a crypto-only decision pass
   `vix: null` (do NOT feed DVOL/Fear-&-Greed into the `vix` slot — they have different scales and will
   mis-trip it); use `crypto_implied_vol`/`crypto_fear_greed` as qualitative pre-mortem context instead.
+- **Direction needs a series, not a level.** `macro_context` gives a SNAPSHOT (rate level, VIX level). Do
+  NOT infer a direction ("Fed cutting", "rates rising") from a level alone — state the level ("policy rate
+  ~3.6%") and pull the directional series (`treasury_data`/`world_macro`/rate history) before claiming any
+  trend. No series → the direction is unknown; say so. (SKILL.md "Macro direction needs a directional series".)
 - Candidates (**narrow / seeded requests only** — a single name, a named sector, or a user-supplied
   list): `market_movers` / `crypto_movers`, `etf_holdings`, `retail_buzz` / `crypto_buzz`,
   `filing_search`, `news_search`. (No `screen`/`peers` exist.) **For a BROAD discovery request do NOT
@@ -190,6 +194,12 @@ Each reads Scout (data, not verdict) and returns a tight, sourced read **for BOT
   `dividends`, `ownership`. Crypto: `crypto_dossier`, `crypto_asset_profile`, `crypto_onchain`,
   `defi_overview`/`stablecoin_supply`. *Prompt seed:* "Quality, durability, valuation context. What is
   the long-term fundamental case and its single biggest hole? Cite multiples/figures with `as_of`."
+  **Capital-structure check (execution-grade theses):** Scout's free news feed (GDELT) is **not
+  exhaustive** and routinely MISSES capital-structure events — equity raises, dilution/secondaries,
+  buybacks, convertible issuance, M&A. Do a **dedicated recent-filings pass** (`filing_search` /
+  `sec_financials` / `ownership`; crypto: `crypto_onchain` supply/unlocks, `crypto_asset_profile`)
+  rather than trusting the news feed, and **report what you checked**. For crypto, treat token
+  unlocks / emissions as the dilution analogue.
 - **Technical** — `technicals`, `price_history`, `relative_strength`, `options_volatility`. Crypto:
   `crypto_technicals`, `crypto_price_history`, `crypto_order_book`, `crypto_implied_vol`,
   `crypto_derivatives`. *Prompt seed:* "Trend, momentum, overbought/oversold, support/resistance,
@@ -256,6 +266,15 @@ ask for** (each type has its own minimum; relabelling thin data to a cheaper typ
   - **Explicit order below the conviction floor:** `size`/`allocate` silently **drop** a sub-floor leg
     (floor = 2). For a named imperative on a specific ticker, pass **`"explicit_order": true`** so it is
     honored — then flag the low conviction in the output (don't fake enthusiasm).
+  - **Mixed request — a user-named leg PLUS skill-derived ideas** ("put $100 into MINE that I named + 2
+    of your best picks"). A call-level `"explicit_order": true` floor-exempts EVERY leg, which would wrongly
+    keep your sub-floor ideas too. Instead tag only the user-named leg with a per-candidate
+    **`"explicit": true`** in its `allocate` candidate row — it bypasses the floor while your sub-floor
+    legs in the same call are still dropped honestly.
+  - **Equal split / explicit weights.** `allocate` weights by conviction by DEFAULT. When the user asked
+    to "split equally across these", pass **`"weighting": "equal"`**; when they gave explicit per-leg
+    weights, put a **`"weight"`** on each candidate row (overrides conviction-weighting). The per-asset
+    cap still binds in every mode — never hand-weight to dodge it.
 - Limits: `python -m vizier limits --json '{"portfolio":{"nav":..,"cash":..,"positions":[...]}, "candidate":{"ticker":..,"value":..,"sector":..}}'`.
   (For a CURRENT over-weight scan, call it with `"value": 0` per held ticker/sector — see the rebalance
   rule in SKILL.md.) If a leg violates max-position/sector/min-cash or collides with max-%/asset on a

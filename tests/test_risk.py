@@ -116,6 +116,63 @@ def test_allocate_drops_below_floor_unless_explicit(profile):
     assert {a["ticker"] for a in forced["allocations"]} == {"AAA", "LOW"}
 
 
+def test_allocate_per_candidate_explicit_keeps_only_named_subfloor_leg(profile):
+    # Mixed request: "$100 into MINE that I named + your best idea, plus a
+    # sub-floor pick of yours". The user-named sub-floor leg (explicit) is kept;
+    # the skill-derived sub-floor leg is still dropped — without a call-level
+    # explicit_order that would floor-exempt everything.
+    candidates = [
+        {"ticker": "GOOD", "conviction": 4},
+        {"ticker": "MINE", "conviction": 1, "explicit": True},
+        {"ticker": "WEAK", "conviction": 1},
+    ]
+    result = risk.allocate_across_candidates(100, candidates, nav=100_000, profile=profile)
+    assert result["skipped"] == ["WEAK"]
+    assert {a["ticker"] for a in result["allocations"]} == {"GOOD", "MINE"}
+
+
+def test_allocate_equal_weighting_splits_evenly_not_by_conviction(profile):
+    # "split equally across these" must NOT silently conviction-weight.
+    candidates = [
+        {"ticker": "AAA", "conviction": 5},
+        {"ticker": "BBB", "conviction": 3},
+        {"ticker": "CCC", "conviction": 2},
+    ]
+    result = risk.allocate_across_candidates(
+        90, candidates, nav=100_000, profile=profile, weighting="equal"
+    )
+    by_ticker = {a["ticker"]: a["size"] for a in result["allocations"]}
+    assert by_ticker["AAA"] == pytest.approx(30.0)
+    assert by_ticker["BBB"] == pytest.approx(30.0)
+    assert by_ticker["CCC"] == pytest.approx(30.0)
+    assert result["weighting"] == "equal"
+
+
+def test_allocate_explicit_weights_are_honored_and_caps_still_apply(profile):
+    # Explicit per-candidate weights override conviction-weighting; the per-asset
+    # cap still binds (small NAV: 25% of 200 = 50), shaving the over-weight leg.
+    candidates = [
+        {"ticker": "AAA", "conviction": 5, "weight": 3},
+        {"ticker": "BBB", "conviction": 5, "weight": 1},
+    ]
+    result = risk.allocate_across_candidates(100, candidates, nav=200, profile=profile)
+    by_ticker = {a["ticker"]: a for a in result["allocations"]}
+    assert by_ticker["AAA"]["target"] == pytest.approx(75.0)  # 100 * 3/4
+    assert by_ticker["AAA"]["size"] == pytest.approx(50.0)  # capped at 25% of 200
+    assert by_ticker["AAA"]["capped"] is True
+    assert by_ticker["BBB"]["size"] == pytest.approx(25.0)  # 100 * 1/4, under cap
+    assert result["weighting"] == "explicit"
+    assert result["unallocated"] == pytest.approx(25.0)
+
+
+def test_allocate_unknown_weighting_raises(profile):
+    with pytest.raises(ValueError, match="unknown weighting"):
+        risk.allocate_across_candidates(
+            100, [{"ticker": "AAA", "conviction": 4}], nav=100_000,
+            profile=profile, weighting="momentum",
+        )
+
+
 # ── Sell-side trim: %/$ -> base quantity (rounds DOWN, never oversells) ───────
 
 

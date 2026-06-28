@@ -59,6 +59,10 @@ Sources — <primary first (SEC, releases), then aggregators; with as_of where r
   supported it — `valuation_history` does not exist.
 - **Signal low conviction honestly.** Under an explicit order with weak edge, execute (if it clears the
   gates) **and** say the conviction is low — never fake enthusiasm.
+- **Flag corporate-event blind spots.** Scout's free news feed (GDELT) is not exhaustive and can miss
+  capital-structure events (raises, dilution, buybacks, M&A). On any execution-grade thesis, state in
+  **Risks & caveats** that the news feed may be incomplete for corporate events, and note the dedicated
+  recent-filings / capital-structure check you ran (or, if you couldn't run it, that the gap is open).
 - **Crypto protection caveat.** Any crypto position with a stop must carry the line: *"protection is
   skill-managed (monitoring), not a resting stop on the exchange"* — and, when honest, that in
   confirmation mode it is only checked when you next run Vizier / at session start, not continuously (a

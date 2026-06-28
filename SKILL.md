@@ -112,7 +112,10 @@ ambiguity — never double/triple confirmation of the obvious, never fear of inv
 - **An explicit order overrides the conviction floor.** A named imperative for a specific ticker is an
   explicit order even at conviction 1. When you do call `size`/`allocate` for it, pass
   `"explicit_order": true` or the core silently **drops** the sub-floor leg — then still flag the low
-  conviction honestly in the output. (See `references/pipeline.md`.)
+  conviction honestly in the output. For a **MIXED** `allocate` ("$100 into MINE that I named + 2 of your
+  best ideas"), tag only the user-named leg with a per-candidate `"explicit": true` (not the call-level
+  flag, which would floor-exempt your ideas too), and use `"weighting": "equal"` / per-leg `"weight"` when
+  the user asked to split a fixed way instead of by conviction. (See `references/pipeline.md`.)
 
 **Routing at a glance — on ANY ambiguity, default to the side that does NOT execute.** In a single
 skill, a misread intent can cost a real order, not just "too much research", so the safe default is the
@@ -246,6 +249,35 @@ under one denominator. Mechanics differ sharply by venue: `references/execution-
   re-arm runs only after an explicit `disarm-autonomy` (the post-kill path) or after the 24h window
   expires. Full checklist + re-arm discipline: `references/autonomy-and-safety.md`.
 
+## Honesty under challenge — verify before you concede (non-negotiable)
+
+When a datum or a conclusion of yours is challenged — by the user or by an external source (another AI,
+an article, a screenshot) — **verify before you concede.** Do not fold to sound agreeable, and do not
+invent a face-saving story to reconcile the disagreement.
+
+- **Re-fetch and reconcile the specific number.** Pull the figure from Scout again, check the **`as_of`
+  date**, and check **`splits`** / recent corporate actions (a stock split, special dividend, ticker
+  change, or reverse split moves the price level). A surprising price is usually a split or a stale
+  counter-quote — **the very common reason an external source disagrees is that IT is using old or
+  pre-split prices.** Reconcile that exact number, then either AGREE (with the corrected figure) or
+  REFUTE **with evidence** — never a vague "you may be right".
+- **Scout returns real, live market data — it is NOT a simulated or "own" market.** Never claim, write,
+  or imply that Scout's prices are simulated/fake/a private sandbox to explain away a mismatch. That
+  meta-explanation is false and has no place in a thesis. If a price looks wrong, the correct move is to
+  check split / `as_of` / corporate action, NOT to label the data fabricated.
+- **Defending a verified truth IS honesty.** Honesty is not one-directional deference: if your data is
+  right and the challenger's is stale, hold the line and show why. Conceding a correct figure to seem
+  cooperative is itself a dishonesty. Never fabricate an unverified claim — in either direction.
+
+## Macro direction needs a directional series (not a single level)
+
+A directional macro claim — "the Fed is **cutting**", "rates are **rising**", "inflation is **rolling
+over**" — requires the **directional series / trend**, not one snapshot. With only a level reading (e.g.
+`macro_context` shows the policy rate at ~3.6%), **state the level without a direction** ("policy rate at
+~3.6%", not "the Fed is cutting"). To assert a direction, pull the trend (`treasury_data` / `world_macro`
+/ a rate history) and cite the move; absent that series, say the direction is unknown. Inventing a
+direction from a level is the same fabrication the verify-before-conceding rule forbids.
+
 ## Memory discipline
 
 - **At the START of every session, thesis-check ALL open theses** (`list-theses`; Scout is free/keyless)
@@ -257,6 +289,11 @@ under one denominator. Mechanics differ sharply by venue: `references/execution-
   crypto via the same poll) and write it as `qty` (and
   `cash_qty` for a dollar buy): **the tranche guard sums `qty`, so a thesis without it is invisible to
   tranche accounting.** Record a daily `nav-snapshot`.
+- **Before an execution-grade buy, run a dedicated capital-structure / recent-filings check** — Scout's
+  free news feed (GDELT) is not exhaustive and routinely misses raises, dilution, buybacks and M&A. Use
+  `filing_search` / `sec_financials` / `ownership` (crypto: `crypto_onchain` unlocks/emissions) instead of
+  trusting the news feed, and **FLAG in the thesis output that the news feed may be incomplete for
+  corporate events** (see `references/output-template.md`).
 - **At session start, diff Valet `positions` against `list-theses`** and run `provenance` on every held
   position with **no matching open thesis**. A position with no thesis record = `horizon: unknown` →
   **ASK** the user for intent at the TOP of the output; do not silently apply hold-bias/anti-churn.

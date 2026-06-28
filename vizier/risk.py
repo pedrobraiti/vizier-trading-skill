@@ -165,6 +165,40 @@ def position_size(
     }
 
 
+def _candidate_is_eligible(
+    candidate: dict[str, Any], profile: RiskProfile, *, explicit_order: bool
+) -> bool:
+    """A candidate clears the conviction floor when the WHOLE call is explicit,
+    when THIS leg is flagged ``explicit`` (a user-named leg in a mixed request),
+    or when its conviction is at/above the floor on its own merit."""
+    return (
+        explicit_order
+        or bool(candidate.get("explicit", False))
+        or candidate.get("conviction", 0) >= profile.conviction_floor
+    )
+
+
+def _allocation_weights(
+    candidates: list[dict[str, Any]], weighting: str
+) -> tuple[list[float], float]:
+    """Per-candidate raw weights for the chosen mode, plus their sum.
+
+    An explicit per-candidate ``weight`` on ANY leg switches to explicit-weights
+    mode (honor exactly what the caller asked). Otherwise ``weighting`` selects
+    ``conviction`` (default — proportional to conviction) or ``equal`` (an even
+    split the caller asked for instead of silently conviction-weighting).
+    """
+    if any("weight" in c for c in candidates):
+        weights = [float(c.get("weight", 0.0)) for c in candidates]
+    elif weighting == "equal":
+        weights = [1.0 for _ in candidates]
+    elif weighting == "conviction":
+        weights = [float(c.get("conviction", 0)) for c in candidates]
+    else:
+        raise ValueError(f"unknown weighting '{weighting}'; use 'conviction' or 'equal'")
+    return weights, sum(weights)
+
+
 def allocate_across_candidates(
     total_amount: float,
     candidates: list[dict[str, Any]],
@@ -172,16 +206,26 @@ def allocate_across_candidates(
     profile: RiskProfile,
     *,
     explicit_order: bool = False,
+    weighting: str = "conviction",
 ) -> dict[str, Any]:
-    """Split a fixed budget across candidates weighted by conviction.
+    """Split a fixed budget across candidates, then cap each leg at the per-asset
+    NAV limit. Whatever the caps shave off is reported as ``unallocated`` rather
+    than silently forced back in (forcing it could re-breach a cap).
 
-    Allocation_i = ``total * conviction_i / Σconviction`` (spec, §F "$100 em 3"),
-    then each leg is capped at the per-asset NAV limit. Candidates below the
-    conviction floor are dropped unless ``explicit_order`` is set. Whatever the
-    caps shave off is reported as ``unallocated`` rather than silently forced
-    back in (forcing it could re-breach a cap).
+    Weighting (spec, §F "$100 em 3"):
+      * ``conviction`` (default) — ``Allocation_i = total * conviction_i / Σconviction``.
+      * ``equal`` — even split; honor an explicit "split equally across these"
+        instead of silently conviction-weighting.
+      * explicit per-candidate ``weight`` on any leg — honor those weights exactly
+        (overrides ``weighting``).
 
-    Each candidate dict needs at least ``ticker`` and ``conviction``.
+    Conviction floor: a candidate below the floor is dropped UNLESS the whole call
+    is ``explicit_order`` OR that leg carries ``"explicit": true``. The per-candidate
+    flag is what lets a MIXED request work — a user-named sub-floor leg is kept while
+    skill-derived sub-floor legs in the same call are still dropped (spec, §10 + §E).
+
+    Each candidate dict needs at least ``ticker`` and ``conviction``; optional
+    ``explicit`` (bool) and ``weight`` (float) per leg.
     """
     if nav <= 0:
         raise ValueError("nav must be positive")
@@ -189,23 +233,21 @@ def allocate_across_candidates(
         raise ValueError("total_amount must be non-negative")
 
     eligible = [
-        c
-        for c in candidates
-        if explicit_order or c.get("conviction", 0) >= profile.conviction_floor
+        c for c in candidates if _candidate_is_eligible(c, profile, explicit_order=explicit_order)
     ]
     skipped = [
         c["ticker"]
         for c in candidates
-        if not (explicit_order or c.get("conviction", 0) >= profile.conviction_floor)
+        if not _candidate_is_eligible(c, profile, explicit_order=explicit_order)
     ]
 
-    conviction_sum = sum(c.get("conviction", 0) for c in eligible)
+    weights, weight_sum = _allocation_weights(eligible, weighting)
     cap = _asset_cap(nav, profile)
 
     allocations: list[dict[str, Any]] = []
     allocated_total = 0.0
-    for c in eligible:
-        weight = (c.get("conviction", 0) / conviction_sum) if conviction_sum > 0 else 0.0
+    for c, raw_weight in zip(eligible, weights, strict=True):
+        weight = (raw_weight / weight_sum) if weight_sum > 0 else 0.0
         target = total_amount * weight
         size = min(target, cap)
         allocated_total += size
@@ -225,6 +267,7 @@ def allocate_across_candidates(
         "allocated_total": allocated_total,
         "unallocated": max(0.0, total_amount - allocated_total),
         "asset_cap": cap,
+        "weighting": "explicit" if any("weight" in c for c in eligible) else weighting,
     }
 
 

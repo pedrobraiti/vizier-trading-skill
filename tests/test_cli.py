@@ -53,6 +53,37 @@ def test_cli_size_envelope(capsys, profile_path):
     assert env["data"]["size"] == 65.0  # 100 * 5/5 * 0.65 (conviction-full-size knob)
 
 
+def test_cli_allocate_mixed_explicit_and_equal(capsys, profile_path):
+    # Per-candidate explicit keeps the user-named sub-floor leg; equal weighting
+    # threads through the CLI and splits the kept legs evenly.
+    env = _run(
+        capsys,
+        [
+            "allocate",
+            "--profile-path",
+            str(profile_path),
+            "--json",
+            json.dumps(
+                {
+                    "total_amount": 100,
+                    "nav": 100_000,
+                    "weighting": "equal",
+                    "candidates": [
+                        {"ticker": "GOOD", "conviction": 4},
+                        {"ticker": "MINE", "conviction": 1, "explicit": True},
+                        {"ticker": "WEAK", "conviction": 1},
+                    ],
+                }
+            ),
+        ],
+    )
+    assert env["ok"] is True
+    assert env["data"]["skipped"] == ["WEAK"]
+    sizes = {a["ticker"]: a["size"] for a in env["data"]["allocations"]}
+    assert sizes == {"GOOD": 50.0, "MINE": 50.0}
+    assert env["data"]["weighting"] == "equal"
+
+
 def test_cli_data_sufficiency_abstain(capsys):
     env = _run(
         capsys,
