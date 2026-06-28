@@ -84,6 +84,29 @@ def test_cli_allocate_mixed_explicit_and_equal(capsys, profile_path):
     assert env["data"]["weighting"] == "equal"
 
 
+def test_cli_allocate_missing_total_amount_is_clear(capsys, profile_path):
+    # A missing required field must read clearly, not leak a bare KeyError
+    # message ({"error": "'total_amount'"}).
+    env = _run(
+        capsys,
+        [
+            "allocate",
+            "--profile-path",
+            str(profile_path),
+            "--json",
+            json.dumps(
+                {
+                    "nav": 100_000,
+                    "candidates": [{"ticker": "AAA", "conviction": 4}],
+                }
+            ),
+        ],
+    )
+    assert env["ok"] is False
+    assert env["_exit_code"] == 1
+    assert env["error"] == "missing required field: total_amount"
+
+
 def test_cli_data_sufficiency_abstain(capsys):
     env = _run(
         capsys,

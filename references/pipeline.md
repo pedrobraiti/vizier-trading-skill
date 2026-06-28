@@ -270,7 +270,9 @@ ask for** (each type has its own minimum; relabelling thin data to a cheaper typ
     of your best picks"). A call-level `"explicit_order": true` floor-exempts EVERY leg, which would wrongly
     keep your sub-floor ideas too. Instead tag only the user-named leg with a per-candidate
     **`"explicit": true`** in its `allocate` candidate row — it bypasses the floor while your sub-floor
-    legs in the same call are still dropped honestly.
+    legs in the same call are still dropped honestly. Note the kept named leg is still conviction-weighted
+    by ITS OWN conviction, so a low-conviction named pick gets a small slice — if the user clearly wants it
+    funded meaningfully, also bump its `weight` (or pass `weighting`).
   - **Equal split / explicit weights.** `allocate` weights by conviction by DEFAULT. When the user asked
     to "split equally across these", pass **`"weighting": "equal"`**; when they gave explicit per-leg
     weights, put a **`"weight"`** on each candidate row (overrides conviction-weighting). The per-asset

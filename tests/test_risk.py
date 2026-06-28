@@ -173,6 +173,63 @@ def test_allocate_unknown_weighting_raises(profile):
         )
 
 
+def test_allocate_unknown_weighting_raises_even_with_explicit_weights(profile):
+    # A garbage weighting must fail loudly EVEN when per-candidate weights are
+    # present — it used to be silently ignored on the explicit-weights path.
+    with pytest.raises(ValueError, match="unknown weighting"):
+        risk.allocate_across_candidates(
+            100,
+            [
+                {"ticker": "AAA", "conviction": 4, "weight": 1},
+                {"ticker": "BBB", "conviction": 4, "weight": 2},
+            ],
+            nav=100_000,
+            profile=profile,
+            weighting="garbage",
+        )
+
+
+def test_allocate_negative_weight_rejected(profile):
+    # A negative weight would otherwise yield a negative (short) size that the
+    # upper-bound cap min(target, cap) cannot catch — a buy must never go short.
+    with pytest.raises(ValueError, match="weight must be non-negative"):
+        risk.allocate_across_candidates(
+            100,
+            [
+                {"ticker": "AAA", "conviction": 4, "weight": -1},
+                {"ticker": "BBB", "conviction": 4, "weight": 2},
+            ],
+            nav=100_000,
+            profile=profile,
+        )
+
+
+def test_allocate_negative_conviction_rejected(profile):
+    with pytest.raises(ValueError, match="conviction must be non-negative"):
+        risk.allocate_across_candidates(
+            100,
+            [{"ticker": "AAA", "conviction": -3}],
+            nav=100_000,
+            profile=profile,
+        )
+
+
+def test_allocate_zero_weight_is_allowed_and_gets_nothing(profile):
+    # Zero weight is valid (not negative): the leg simply receives nothing.
+    result = risk.allocate_across_candidates(
+        100,
+        [
+            {"ticker": "AAA", "conviction": 4, "weight": 0},
+            {"ticker": "BBB", "conviction": 4, "weight": 1},
+        ],
+        nav=100_000,
+        profile=profile,
+    )
+    by_ticker = {a["ticker"]: a["size"] for a in result["allocations"]}
+    assert by_ticker["AAA"] == pytest.approx(0.0)
+    assert by_ticker["BBB"] == pytest.approx(100.0)
+
+
 # ── Sell-side trim: %/$ -> base quantity (rounds DOWN, never oversells) ───────
 
 

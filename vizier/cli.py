@@ -52,6 +52,9 @@ def _cmd_size(payload: dict[str, Any], args: argparse.Namespace) -> Any:
 
 
 def _cmd_allocate(payload: dict[str, Any], args: argparse.Namespace) -> Any:
+    for field in ("total_amount", "candidates", "nav"):
+        if field not in payload:
+            raise ValueError(f"missing required field: {field}")
     return risk.allocate_across_candidates(
         total_amount=payload["total_amount"],
         candidates=payload["candidates"],

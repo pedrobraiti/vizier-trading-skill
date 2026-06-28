@@ -104,6 +104,13 @@ def load_profile(path: str | Path, name: str | None = None) -> RiskProfile:
     )
 
 
+# Weighting modes the allocator officially supports. An explicit per-candidate
+# ``weight`` overrides the mode, but the mode string itself is still validated so
+# a garbage value never passes silently (it would otherwise be ignored when
+# weights are present, yet rejected when they are not — an inconsistency).
+_ALLOWED_WEIGHTINGS = ("conviction", "equal")
+
+
 # ── Sizing ───────────────────────────────────────────────────────────────────
 
 
@@ -231,6 +238,19 @@ def allocate_across_candidates(
         raise ValueError("nav must be positive")
     if total_amount < 0:
         raise ValueError("total_amount must be non-negative")
+    # Validate the weighting mode UP FRONT — regardless of whether per-candidate
+    # weights are present — so a garbage value ("momentum") fails loudly instead
+    # of being silently ignored on the explicit-weights path.
+    if weighting not in _ALLOWED_WEIGHTINGS:
+        raise ValueError(f"unknown weighting '{weighting}'; use 'conviction' or 'equal'")
+    # A buy-allocation must never produce a negative (short) size: reject negative
+    # per-candidate weight/conviction here, the same way negative total_amount and
+    # nav<=0 are rejected above. Zero is allowed (it simply gets nothing).
+    for candidate in candidates:
+        if "weight" in candidate and float(candidate["weight"]) < 0:
+            raise ValueError("weight must be non-negative")
+        if float(candidate.get("conviction", 0)) < 0:
+            raise ValueError("conviction must be non-negative")
 
     eligible = [
         c for c in candidates if _candidate_is_eligible(c, profile, explicit_order=explicit_order)
