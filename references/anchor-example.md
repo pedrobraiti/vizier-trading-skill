@@ -1,5 +1,9 @@
 # Canonical trace — "make 3 investments totaling $100"
 
+> **`python -m vizier …` = the core interpreter resolved in SKILL.md** (the skill's bundled `.venv`
+> python), never bare system `python`.
+
+
 The reference flow. When a request looks like this ("research the market and make 3 investments of
 $100"), walk these steps. It exercises every part of the design; deviate only with reason.
 

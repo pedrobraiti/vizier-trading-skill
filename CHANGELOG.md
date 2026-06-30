@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-06-30
+
+### Fixed (hardening from a user-sim round on the 0.2.3 hang fix)
+- **The "don't co-batch" rule is generalized to ANY gated tool, not just the core.** 0.2.3 only
+  forbade batching `python -m vizier` with Scout calls, but the freeze is caused by *any* gated tool
+  (the core Bash, AND Valet `ibkr`/`crypto`) sharing a parallel block with the always-allow Scout
+  calls — and Stage 0a / the class-1 sweep / the session-start diff actively mix Valet reads with the
+  Scout regime read. The rule now says: sequence by approval class — always-allow Scout in one block,
+  gated calls (core, Valet) separately.
+- **The core interpreter now has a concrete discovery path.** 0.2.3 said "use `<skill_dir>/.venv`"
+  but never told the agent how to obtain that absolute path from an arbitrary cwd. It now points at
+  the standard `~/.claude/skills/vizier/.venv/…` first, with a Glob fallback, and says to cache it.
+- **Every `references/*.md` now carries a one-line note** that `python -m vizier` means the resolved
+  venv interpreter (the bare commands in fenced examples were copy-verbatim traps to the system python).
+- **The session-start `positions`-vs-`list-theses` diff + `provenance` step is now explicitly
+  best-effort too** (it shares the core/Valet dependency with the thesis-check), so a fresh machine
+  degrades with a note instead of blocking the read-only report.
+- **`reconcile` mislabeled as a Valet tool** in the Stage 0a book-pull is corrected to
+  `reconcile_pending` (Valet's actual tool; `reconcile` is a core CLI command).
+
+### Added
+- **The session's new Scout tools are now routed in the pipeline coverage areas** (`references/pipeline.md`):
+  `fda_events`, `btc_network`, `defi_fees`, `coinbase_premium`, `stablecoin_peg`, `cot_positioning`,
+  `commodity_ratios`, and the relative-value/pairs primitives `cointegration_test` /
+  `find_cointegrated_pairs` — previously unreachable by the brain.
+
 ## [0.2.3] - 2026-06-30
 
 ### Fixed

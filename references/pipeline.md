@@ -1,5 +1,9 @@
 # The reasoning pipeline — subagent fan-out
 
+> **In every `python -m vizier …` below, `python` = the core interpreter you resolved in SKILL.md**
+> (the skill's bundled `.venv` python) — never bare system `python`. And never co-batch a core/Valet
+> call with always-allow Scout calls in one parallel block (see SKILL.md).
+
 The pipeline is a **fan-out of subagents** (the Agent tool), not a rigid workflow. Adapt depth to the
 request: a quick read = one analyst pass; a real money decision = the full chain below. Borrowed
 deliberately from TradingAgents (roles) and ai-hedge-fund (persona lenses) — but with **their data
@@ -206,7 +210,9 @@ crypto leg. See SKILL.md safety rules + `references/output-template.md`.
 Each reads Scout (data, not verdict) and returns a tight, sourced read **for BOTH horizons**.
 
 - **Fundamental** — `company_dossier`, `fundamentals`, `sec_financials`, `quality_metrics`,
-  `dividends`, `ownership`. Crypto: `crypto_dossier`, `crypto_asset_profile`, `crypto_onchain`,
+  `dividends`, `ownership` (now incl. short interest), `fda_events` (pharma/biotech approval/recall
+  catalysts). Crypto: `crypto_dossier`, `crypto_asset_profile`, `crypto_onchain`, `btc_network` (BTC
+  base-layer fundamentals + real NVT), `defi_fees` (protocol fees/revenue cash-flow),
   `defi_overview`/`stablecoin_supply`. *Prompt seed:* "Quality, durability, valuation context. What is
   the long-term fundamental case and its single biggest hole? Cite multiples/figures with `as_of`."
   **Capital-structure check (execution-grade theses):** Scout's free news feed (GDELT) is **not
@@ -217,14 +223,20 @@ Each reads Scout (data, not verdict) and returns a tight, sourced read **for BOT
   unlocks / emissions as the dilution analogue.
 - **Technical** — `technicals`, `price_history`, `relative_strength`, `options_volatility`. Crypto:
   `crypto_technicals`, `crypto_price_history`, `crypto_order_book`, `crypto_implied_vol`,
-  `crypto_derivatives`. *Prompt seed:* "Trend, momentum, overbought/oversold, support/resistance,
+  `crypto_derivatives`, `coinbase_premium` (US-spot demand). **Relative-value / pairs:**
+  `cointegration_test` / `find_cointegrated_pairs` — mean-reverting spreads (hedge ratio, spread
+  z-score, half-life); these MEASURE the relationship, the pair-trade decision is yours.
+  *Prompt seed:* "Trend, momentum, overbought/oversold, support/resistance,
   liquidity. Short-term entry/timing read. Numbers, no verdict-as-fact."
 - **News-sentiment** — `news` / `news_search`, `analyst_view`, `retail_buzz`/`crypto_buzz`,
   `wikipedia_attention`. *Prompt seed:* "What's the narrative and is it shifting? Consensus +
   price-target relay (as third-party data). Attention spikes?"
-- **Macro** — `macro_context`, `world_macro`, `treasury_data`, `sector_performance`. Crypto:
-  `crypto_macro`, `crypto_fear_greed`. *Prompt seed:* "Who benefits / is hurt by this regime? Rate /
-  cycle / dominance sensitivity for this name's horizon."
+- **Macro** — `macro_context` (now incl. Fed net liquidity, financial conditions, claims, nowcasts,
+  VIX term structure), `world_macro`, `treasury_data`, `sector_performance`, `cot_positioning`
+  (speculator/commercial futures positioning), `commodity_ratios` (copper-gold / gold-silver
+  bellwethers). Crypto: `crypto_macro`, `crypto_fear_greed`, `stablecoin_peg` (peg-stress).
+  *Prompt seed:* "Who benefits / is hurt by this regime? Rate / cycle / dominance sensitivity for
+  this name's horizon."
 
 ## Stage 2 — Bull × Bear (debate the thesis)
 

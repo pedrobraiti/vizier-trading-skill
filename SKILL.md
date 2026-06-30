@@ -45,20 +45,31 @@ python -m vizier <command> --json '<payload>'
 > `python -m vizier` this session:
 > - It is `<skill_dir>/.venv/Scripts/python.exe` (Windows) or `<skill_dir>/.venv/bin/python` (Unix),
 >   where `<skill_dir>` is the directory this SKILL.md lives in (the one holding `references/`).
+> - **Get the concrete path** (your cwd is usually NOT the skill dir): on a standard install the
+>   skill lives at `~/.claude/skills/vizier`, so try `~/.claude/skills/vizier/.venv/Scripts/python.exe`
+>   first. If that's absent, locate it — `Glob **/vizier/.venv/Scripts/python.exe`, or resolve the
+>   `references/` dir you were given and take its `../.venv`. Cache the resolved absolute path and
+>   reuse it for every core call this session.
 > - Verify once: `"<that path>" -m vizier profile` should return an `{"ok": ...}` envelope. If the
->   `.venv` is missing, create it (`python -m venv <skill_dir>/.venv`) and install the core
+>   `.venv` is missing, create it (`python -m venv <skill_dir>/.venv` — this one uses bare system
+>   `python`, which is correct since the venv doesn't exist yet) and install the core
 >   (`"<skill_dir>/.venv/Scripts/python.exe" -m pip install -e "<skill_dir>"`).
 >
 > **Throughout this skill and `references/`, every `python -m vizier …` means that resolved
 > interpreter — never bare system `python`.** (A real session failed exactly here: the core was
 > installed in the skill's venv, but the agent ran bare `python` against the system interpreter.)
 
-> **Never batch a `python -m vizier` Bash call in the SAME parallel tool block as Scout (`mcp__scout`)
-> calls.** The core call may need a permission decision, and a pending permission in a parallel batch
-> freezes the WHOLE batch — including the auto-approved Scout calls — with **no timeout** (a real
-> session hung ~25 min this way, looking like "thinking forever"). Sequence them: Scout data fan-out
-> in one step, core calls in another. The user can pre-approve the core once with "always allow" to
-> skip the prompt; a Notification hook now also makes any pending prompt audible.
+> **Never co-batch a GATED tool with the auto-approved Scout calls in one parallel tool block.**
+> Only `mcp__scout` is always-allow; **everything else needs a permission decision** — the core
+> (`python -m vizier` over Bash), and BOTH Valet servers (`ibkr` and `crypto`: `portfolio`,
+> `positions`, `account_summary`, `session_status`, `reconcile_pending`, …). A pending permission on
+> ANY of them inside a parallel batch freezes the WHOLE batch — including the auto-approved Scout
+> calls — with **no timeout** (a real session hung ~25 min this way, looking like "thinking forever").
+> So **sequence by approval class**: fire the always-allow Scout reads as one parallel block; then,
+> separately, the gated calls (core, Valet). This applies to Stage 0a (pulling the live book + the
+> regime read), the class-1 sweep, and the session-start memory diff — anywhere you'd be tempted to
+> mix "pull the book and read the regime" into one block. The user can pre-approve the core/Valet once
+> with "always allow"; a Notification hook also now makes any pending prompt audible.
 
 | Need | Command |
 |---|---|
@@ -92,7 +103,7 @@ This is the spirit every rule below serves. The tool is **powerful and obedient*
    recommendation count is — the gates **annotate** it (honest caveats), they do not prune or downsize it.
 2. **The overtrading defense is INTELLIGENCE, not a hard cap.** There is no "max N trades/day" or "only
    look at N stocks" rule for a human at the wheel. In **autonomous or vague** mode the brake is *judgment*:
-   you MUST first pull the live book (Valet `portfolio`/`positions` + `account_summary`/`reconcile`) and
+   you MUST first pull the live book (Valet `portfolio`/`positions` + `account_summary`/`reconcile_pending`) and
    reason explicitly — "given what's already held and the diversification, is this trade worth it, or is the
    right move to do **nothing**?" Doing nothing is a first-class outcome. (The numeric autonomy ceilings in
    §B are a *separate* robot-malfunction backstop — see point 4 — not the everyday brake.)
@@ -388,7 +399,10 @@ direction from a level is the same fabrication the verify-before-conceding rule 
   trusting the news feed, and **FLAG in the thesis output that the news feed may be incomplete for
   corporate events** (see `references/output-template.md`).
 - **At session start, diff Valet `positions` against `list-theses`** and run `provenance` on every held
-  position with **no matching open thesis**. A position with no thesis record = `horizon: unknown` →
+  position with **no matching open thesis**. (Same **best-effort** rule as the thesis-check above: this
+  needs the core (`list-theses`/`provenance`) and a gated Valet read — if the core can't be resolved or
+  Valet isn't reachable, note it once and continue the read-only work; never block on it.) A position
+  with no thesis record = `horizon: unknown` →
   **ASK** the user for intent at the TOP of the output; do not silently apply hold-bias/anti-churn.
   **Broker is truth for existence/size; memory is truth for date/why.** Use ONE canonical symbol form as
   the memory key (crypto always `BASE/QUOTE` with the resolved quote, e.g. `BTC/USDT`) and normalize

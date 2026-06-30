@@ -1,5 +1,9 @@
 # Execution mechanics — the §C venue cheatsheet
 
+> **`python -m vizier …` = the core interpreter resolved in SKILL.md** (the skill's bundled `.venv`
+> python), never bare system `python`.
+
+
 Read this before sending any order. The two Valet servers mirror tool **names** but differ in
 **capabilities**. Get the venue's quirks right or you mis-size, double-buy, or leave a position
 unprotected.

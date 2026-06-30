@@ -1,5 +1,9 @@
 # Autonomy & safety — the §B discipline
 
+> **`python -m vizier …` = the core interpreter resolved in SKILL.md** (the skill's bundled `.venv`
+> python), never bare system `python`.
+
+
 Autonomy is the dangerous mode. It is **opt-in only** (the user explicitly says "execute without
 asking"), and arming it is a checklist, not a vibe. The deterministic core (`python -m vizier`) holds
 the math; this file is the order in which you call it and the Valet, and the rules around it.
