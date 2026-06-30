@@ -39,6 +39,27 @@ head — that is exactly the "forget between rounds" failure it exists to preven
 python -m vizier <command> --json '<payload>'
 ```
 
+> **Which `python`? — resolve the core interpreter ONCE, before any core call.** The core lives in
+> THIS skill's bundled virtualenv, **not** the system Python. A fresh chat's bare `python` is the
+> system interpreter and fails with `No module named vizier`. So pin the interpreter for every
+> `python -m vizier` this session:
+> - It is `<skill_dir>/.venv/Scripts/python.exe` (Windows) or `<skill_dir>/.venv/bin/python` (Unix),
+>   where `<skill_dir>` is the directory this SKILL.md lives in (the one holding `references/`).
+> - Verify once: `"<that path>" -m vizier profile` should return an `{"ok": ...}` envelope. If the
+>   `.venv` is missing, create it (`python -m venv <skill_dir>/.venv`) and install the core
+>   (`"<skill_dir>/.venv/Scripts/python.exe" -m pip install -e "<skill_dir>"`).
+>
+> **Throughout this skill and `references/`, every `python -m vizier …` means that resolved
+> interpreter — never bare system `python`.** (A real session failed exactly here: the core was
+> installed in the skill's venv, but the agent ran bare `python` against the system interpreter.)
+
+> **Never batch a `python -m vizier` Bash call in the SAME parallel tool block as Scout (`mcp__scout`)
+> calls.** The core call may need a permission decision, and a pending permission in a parallel batch
+> freezes the WHOLE batch — including the auto-approved Scout calls — with **no timeout** (a real
+> session hung ~25 min this way, looking like "thinking forever"). Sequence them: Scout data fan-out
+> in one step, core calls in another. The user can pre-approve the core once with "always allow" to
+> skip the prompt; a Notification hook now also makes any pending prompt audible.
+
 | Need | Command |
 |---|---|
 | Show the active risk profile | `profile` |
@@ -349,7 +370,11 @@ direction from a level is the same fabrication the verify-before-conceding rule 
 ## Memory discipline
 
 - **At the START of every session, thesis-check ALL open theses** (`list-theses`; Scout is free/keyless)
-  and surface any that crossed a trigger **at the TOP** of the output — never bury them.
+  and surface any that crossed a trigger **at the TOP** of the output — never bury them. This is
+  **best-effort**: if the core interpreter can't be resolved or `list-theses` errors (e.g. a fresh
+  machine without the venv), note "thesis-check unavailable (core not resolved)" once and **continue
+  the read-only work** — never block the whole report on it. (`list-theses` reads `memory/theses/*.yaml`;
+  if needed you can read those files directly as a fallback.)
 - **On a buy, write the thesis WITH the quantitative `baseline_snapshot` AND the filled `qty`**
   (`write-thesis`) — price, multiples, RSI/SMA, VIX/rates, analyst consensus, ownership, catalyst date —
   because Scout's `as_of` cannot reconstruct soft signals; the thesis-check diffs against this baseline.

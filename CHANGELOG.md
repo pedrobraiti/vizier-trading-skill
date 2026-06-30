@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-06-30
+
+### Fixed
+- **The core interpreter is now pinned to the skill's own venv, not bare `python`.** A real session
+  hung and then failed because the skill told the agent to run `python -m vizier …`, which in a fresh
+  chat resolves to the **system** Python — where the core isn't installed (`No module named vizier`).
+  SKILL.md now requires resolving the interpreter once (`<skill_dir>/.venv/Scripts/python.exe` /
+  `bin/python`) and using it for every core call, with a create-if-missing recipe.
+- **Never batch a `python -m vizier` Bash call with Scout MCP calls in one parallel tool block.** A
+  pending permission on the core call freezes the whole batch — including the auto-approved Scout
+  calls — with no timeout (the same session sat ~25 min looking like "thinking forever"). SKILL.md now
+  forbids co-batching and tells you to sequence data and core calls.
+- **Session-start thesis-check is now explicitly best-effort.** If the core can't be resolved it notes
+  "thesis-check unavailable" once and continues the read-only work instead of blocking the report;
+  `list-theses` reads `memory/theses/*.yaml`, which can be read directly as a fallback.
+
 ## [0.2.2] - 2026-06-28
 
 ### Fixed
