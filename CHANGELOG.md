@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] - 2026-06-30
+
+### Fixed
+- **The no-co-batch rule now explicitly names `WebSearch`/`WebFetch` (and subagents) as gated.** A
+  real GOLD11 session hung ~25 min because the agent co-batched a `WebSearch` with the always-allow
+  Scout reads — the exact freeze the 0.2.4 rule warns about, but its examples only listed the core
+  Bash call and Valet, so the agent mentally grouped `WebSearch` with "reads" (like Scout) instead of
+  with gated tools. The rule now makes the trap explicit: the ONLY auto-approved tool is `mcp__scout`;
+  everything else is gated *including tools that feel like a read* (`WebSearch`/`WebFetch`), and
+  `WebSearch` is called out as the classic trap. Fire any gated tool in its own step. (Paired with a
+  machine-local change: `WebSearch`/`WebFetch` were added to always-allow, which removes the freeze at
+  the source on this install; the rule keeps the defense portable and for any other gated tool.)
+
 ## [0.2.4] - 2026-06-30
 
 ### Fixed (hardening from a user-sim round on the 0.2.3 hang fix)

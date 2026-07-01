@@ -60,16 +60,20 @@ python -m vizier <command> --json '<payload>'
 > installed in the skill's venv, but the agent ran bare `python` against the system interpreter.)
 
 > **Never co-batch a GATED tool with the auto-approved Scout calls in one parallel tool block.**
-> Only `mcp__scout` is always-allow; **everything else needs a permission decision** — the core
-> (`python -m vizier` over Bash), and BOTH Valet servers (`ibkr` and `crypto`: `portfolio`,
-> `positions`, `account_summary`, `session_status`, `reconcile_pending`, …). A pending permission on
-> ANY of them inside a parallel batch freezes the WHOLE batch — including the auto-approved Scout
-> calls — with **no timeout** (a real session hung ~25 min this way, looking like "thinking forever").
-> So **sequence by approval class**: fire the always-allow Scout reads as one parallel block; then,
-> separately, the gated calls (core, Valet). This applies to Stage 0a (pulling the live book + the
-> regime read), the class-1 sweep, and the session-start memory diff — anywhere you'd be tempted to
-> mix "pull the book and read the regime" into one block. The user can pre-approve the core/Valet once
-> with "always allow"; a Notification hook also now makes any pending prompt audible.
+> The ONLY auto-approved tool is `mcp__scout`. **Everything else is gated** (needs a permission
+> decision) — and that INCLUDES tools that *feel* like a read: **`WebSearch`, `WebFetch`**,
+> `Agent`/subagents, the core (`python -m vizier` over Bash), and BOTH Valet servers (`ibkr`/`crypto`:
+> `portfolio`, `positions`, `account_summary`, `session_status`, `reconcile_pending`, …). The classic
+> trap is **`WebSearch`**: it's research, so it's tempting to fire it in the SAME parallel block as the
+> Scout data reads — but it's gated, and a pending permission on ANY gated tool in a parallel batch
+> freezes the WHOLE batch (including the auto-approved Scout calls) with **no timeout**. Two real
+> sessions hung ~25 min this exact way — once on a co-batched core Bash call, once on a co-batched
+> `WebSearch` — each looking like "thinking forever".
+> So **sequence by approval class**: fire the always-allow Scout reads as one parallel block; fire any
+> gated tool (WebSearch, core, Valet, a subagent) in its OWN separate step. Applies to Stage 0a, the
+> class-1 sweep, the session-start memory diff, AND any web research done alongside a Scout sweep. (The
+> user may pre-approve tools with "always allow" — e.g. `WebSearch`/`WebFetch`, which removes the freeze
+> for those — but when in doubt, still sequence: it's free insurance.)
 
 | Need | Command |
 |---|---|
