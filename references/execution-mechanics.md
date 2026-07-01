@@ -96,14 +96,17 @@ Consequences you MUST respect:
   (not 45).
 - **No `wait_for_fill`** → confirm fills by **polling `order_status`** until filled/timeout. Never
   re-call `close_position` to "check" (hits the cooldown guard).
-- **Protective stop does NOT exist as a resting order.** The thesis stop becomes a **SOFT trigger the
-  skill monitors** (poll `get_quote`); on cross, the skill fires a `sell`/`close_position` at market.
-  **Tell the user explicitly, on every crypto position with a stop:** *"protection is skill-managed
-  (monitoring), not a resting stop order on the exchange"* — and be honest about WHEN it fires: in the
-  default **confirmation** mode there is no watcher, so the soft stop is only evaluated **when you next
-  invoke Vizier / at session start**, NOT continuously. A real 24/7 soft stop needs armed autonomy plus a
-  scheduled loop keeping Vizier running. Don't let the word "monitoring" imply protection the default
-  posture doesn't provide. This is why 24/7 autonomy fits crypto better (and raises the §B bar).
+- **Protective stop: prefer the EXCHANGE-NATIVE `stop_order` (Valet ≥0.6.0), soft stop as fallback.**
+  `stop_order(symbol, side, quantity, stop_price, limit_price?)` places a resting **trigger order on
+  the exchange** — it fires even when no agent is running, which is exactly what an unattended position
+  needs. Mechanics to respect: most spot APIs (binance included) only offer **stop-LIMIT**, so pass
+  `limit_price` (for a SELL stop, at or slightly below `stop_price`) and **disclose the gap risk** ("a
+  violent gap can jump the limit and leave the stop unfilled"). Sized by base `quantity` only. The tool
+  **refuses cleanly** where the exchange has no native stops — ONLY then fall back to the **SOFT
+  skill-monitored stop**, with the old disclosure verbatim: *"protection is skill-managed (monitoring),
+  not a resting stop order on the exchange"*, honest about WHEN it fires (in default confirmation mode
+  only when Vizier is next invoked, NOT continuously; a real 24/7 soft watch needs armed autonomy plus
+  a scheduled loop). Never let "monitoring" imply protection the posture doesn't provide.
 - **Crypto-specific pre-mortem:** peg risk if quoting against `USDT`/`USDC` (check `stablecoin_supply`);
   token unlocks / network upgrades / governance / halving as the event-risk analogue to earnings
   blackout; liquidity/slippage — prefer LIMIT with a slippage band off the majors, market only on

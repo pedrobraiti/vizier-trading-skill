@@ -267,6 +267,31 @@ def test_compute_drawdown_empty_series_is_zero(memory_dir):
     assert dd["samples"] == 0
 
 
+def test_compute_drawdown_refuses_mixed_venues_without_filter(memory_dir):
+    # An interleaved IBKR($8)/crypto($1000) series reads as a phantom ~99% drawdown
+    # that would trip the breaker on garbage — mixing venues must fail loudly.
+    memory.record_nav_snapshot(8.0, timestamp="2026-01-01T00:00:00+00:00",
+                               venue="ibkr", memory_dir=memory_dir)
+    memory.record_nav_snapshot(1000.0, timestamp="2026-01-01T00:00:01+00:00",
+                               venue="crypto", memory_dir=memory_dir)
+    memory.record_nav_snapshot(7.5, timestamp="2026-01-02T00:00:00+00:00",
+                               venue="ibkr", memory_dir=memory_dir)
+    with pytest.raises(ValueError, match="multiple venues"):
+        memory.compute_drawdown(memory_dir=memory_dir)
+
+
+def test_compute_drawdown_filters_by_venue(memory_dir):
+    memory.record_nav_snapshot(1000.0, timestamp="2026-01-01T00:00:00+00:00",
+                               venue="crypto", memory_dir=memory_dir)
+    memory.record_nav_snapshot(8.0, timestamp="2026-01-01T00:00:01+00:00",
+                               venue="ibkr", memory_dir=memory_dir)
+    memory.record_nav_snapshot(900.0, timestamp="2026-01-02T00:00:00+00:00",
+                               venue="crypto", memory_dir=memory_dir)
+    dd = memory.compute_drawdown(venue="crypto", memory_dir=memory_dir)
+    assert dd["samples"] == 2
+    assert dd["current_drawdown_pct"] == pytest.approx(10.0)
+
+
 # ── Injectable git commits (tests never touch a real repo) ───────────────────
 
 
@@ -287,3 +312,31 @@ def test_commit_is_injectable_and_off_by_default(memory_dir):
     invoked = [args[0] for args, _ in calls]
     assert "init" in invoked and "add" in invoked and "commit" in invoked
     assert not (memory_dir / ".git").exists()  # nothing real was created
+
+
+def test_commit_pushes_when_a_remote_exists(memory_dir):
+    # The memory is the track record — once a private remote is attached, every
+    # commit must also back itself up. Push is best-effort and remote-gated.
+    class Result:
+        def __init__(self, stdout=""):
+            self.stdout = stdout
+
+    calls = []
+
+    def runner_with_remote(args, cwd):
+        calls.append(args)
+        return Result(stdout="origin\n" if args == ["remote"] else "")
+
+    memory.commit_memory("backup", memory_dir=memory_dir, runner=runner_with_remote)
+    assert ["push", "origin", "HEAD"] in calls
+
+
+def test_commit_skips_push_without_a_remote(memory_dir):
+    calls = []
+
+    def runner_no_remote(args, cwd):
+        calls.append(args)
+        return None  # a bare fake: no stdout attribute at all
+
+    memory.commit_memory("backup", memory_dir=memory_dir, runner=runner_no_remote)
+    assert not any(args and args[0] == "push" for args in calls)

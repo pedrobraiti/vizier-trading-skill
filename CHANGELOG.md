@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-07-01
+
+### Added
+- **`scorecard` — the deterministic performance verdict ("does the brain have edge?").** New core
+  module + CLI command scoring EVERY thesis (open + closed): per-thesis P&L and return, days held,
+  and **benchmark-relative alpha** (same-window SPY for ibkr / BTC-USDT for crypto — the skill passes
+  Scout's `price_history` bars in; the core does the date alignment and arithmetic). Aggregates: hit
+  rate, realized/unrealized P&L, win/loss profile, avg alpha — overall, per horizon tag and per venue —
+  plus an activity summary from the decision log. Honesty rules throughout: unscorable theses are
+  NAMED in `skipped` (never guessed), alpha is null with the reason when the benchmark window isn't
+  covered, empty aggregates are null (not fake zeros), and returns are period returns (no
+  annualization). This is what turns the paper-first ladder from anecdotes into evidence.
+- **The memory repo now PUSHES on commit (backup of the track record).** `commit_memory` pushes after
+  each commit when a private remote is attached (best-effort: a network failure only skips the backup,
+  never breaks a trading flow; no remote = no-op). The theses/decision-log/NAV series are the
+  scorecard's raw material — a disk failure must not erase the project's evidence. SKILL.md now
+  instructs passing `--commit` on memory writes.
+
+### Fixed
+- **`drawdown` no longer mixes venues in one NAV series** (manager code-review finding). NAV snapshots
+  record a `venue`, but `compute_drawdown` aggregated ALL snapshots regardless — an interleaved
+  IBKR($8)/crypto($1000) history reads as a phantom ~99% drawdown and would trip the circuit breaker
+  on garbage (SKILL.md itself forbids mixing NAVs under one denominator). `drawdown` now takes `venue`;
+  a multi-venue series without the filter is refused loudly instead of fabricating a number.
+
+### Changed
+- **Crypto protective stops: exchange-native first (Valet ≥0.6.0), soft only as fallback.** The skill
+  now places the crypto Valet's new `stop_order` (a trigger order resting ON the exchange — fires with
+  no agent running) as the default protection, with the stop-LIMIT gap risk disclosed; the soft
+  skill-monitored stop and its verbatim disclosure remain only for venues without native stop support.
+  Updated across SKILL.md, `references/execution-mechanics.md`, `anchor-example.md` and
+  `output-template.md`.
+
 ## [0.2.6] - 2026-07-01
 
 ### Fixed

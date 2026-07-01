@@ -19,11 +19,12 @@ $100"), walk these steps. It exercises every part of the design; deviate only wi
    IBKR and the candidates are equities → say so and degrade (research-only) rather than fail.
 
 3. **Regime + breaker (Scout + core).** `macro_context`, `sector_performance`, `news_search(theme)`
-   (crypto: `crypto_macro`/`crypto_fear_greed`). Record a `nav-snapshot`. Check the breaker (feed the
-   breaker's `monthly_drawdown_pct` from `drawdown`'s **`current_drawdown_pct`**, not `max_drawdown_pct`;
+   (crypto: `crypto_macro`/`crypto_fear_greed`). Record a `nav-snapshot` **with its `venue`**. Check the
+   breaker (feed the breaker's `monthly_drawdown_pct` from `drawdown`'s **`current_drawdown_pct`**, not
+   `max_drawdown_pct`; pass the **`venue`** — NAV is per venue and a mixed series is refused;
    `vix` is equities-only — pass `null` for a crypto-only batch):
    ```bash
-   python -m vizier drawdown --json '{"window_days":30}'      # -> current_drawdown_pct (+ max_drawdown_pct)
+   python -m vizier drawdown --json '{"window_days":30, "venue":"ibkr"}'  # -> current_drawdown_pct (+ max)
    python -m vizier breaker  --json '{"vix": <from macro_context, or null for crypto>, "monthly_drawdown_pct": <current_drawdown_pct>}'
    ```
    If tripped: in confirmation, ask once ("market in panic — still want the 3?"); in autonomy, abandon.
@@ -76,8 +77,9 @@ $100"), walk these steps. It exercises every part of the design; deviate only wi
    - **Confirmation:** present the plan (output template), wait for OK, then per leg: re-verify
      `session_status`, `reconcile`, **IBKR** `preview_order` → `buy(cash_amount=)` (market) → confirm via
      `order_status`/`wait_for_fill` → place the stop POST-fill from `filled_quantity`; **crypto** estimate
-     via `get_quote` + check the notional minimum → `buy(cash_amount=)` → poll `order_status` → arm the
-     **soft** stop and tell the user it's skill-managed.
+     via `get_quote` + check the notional minimum → `buy(cash_amount=)` → poll `order_status` → place the
+     **exchange-native `stop_order`** POST-fill (stop-LIMIT: `limit_price` at/just below the stop;
+     disclose the gap risk) — soft skill-managed stop ONLY if the venue refuses native stops.
    - **Autonomy:** run the arming checklist once, `begin-run` at the start of this round, then per leg
      `autonomy-gate` before the order and `append-decision` the fill after. The gate enforces BOTH the
      per-run cap (33%/5 of this batch) and the daily ceiling. (`references/autonomy-and-safety.md`.)

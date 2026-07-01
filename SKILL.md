@@ -82,8 +82,9 @@ python -m vizier <command> --json '<payload>'
 | Position size by conviction / split a budget | `size` / `allocate` |
 | Will this trade breach a portfolio limit? | `limits` |
 | Circuit breaker (VIX / monthly drawdown) | `breaker` (feed it `drawdown` for the dd leg) |
-| NAV history → drawdown | `nav-snapshot` (write daily) / `drawdown` |
+| NAV history → drawdown | `nav-snapshot` (write daily, with `venue`) / `drawdown` (pass `venue` — NAV is per venue, mixed series are refused) |
 | Thesis store | `write-thesis` / `read-thesis` / `list-theses` / `close-thesis` / `update-reviewed` |
+| **Performance scorecard** ("how am I doing?") | `scorecard` — P&L, hit rate & benchmark alpha over ALL theses |
 | Tranche balances by horizon tag | `tranches` / `tranche-sell` |
 | Reconcile exposure / classify a position | `reconcile` / `provenance` |
 | Build the `reconcile` input from the log / convert a %/$ trim to a sell qty | `build-own-sent-orders` / `trim-qty` |
@@ -332,14 +333,19 @@ under one denominator. Mechanics differ sharply by venue: `references/execution-
   crypto (a diversity benefit, kept in RESEARCH), so a user who said "find me 3 investments and buy $100"
   meaning stocks can end up with a crypto leg they never named. When the user did **NOT** mention crypto,
   any crypto leg in the proposed slate must be **called out EXPLICITLY at the confirmation step before
-  any crypto order** — name it, its venue and its soft-stop/separate-account nature ("1 of 3 is BTC/USDT
-  on the `crypto` exchange — soft skill-managed stop, separate account — include it?") — and the crypto
-  venue must be **okayed** by the user. Never route real money to the crypto exchange on an
+  any crypto order** — name it, its venue and its separate-account/stop nature ("1 of 3 is BTC/USDT
+  on the `crypto` exchange — separate account; the protective stop is a stop-LIMIT resting on the
+  exchange — include it?") — and the crypto venue must be **okayed** by the user. Never route real money to the crypto exchange on an
   unsolicited leg without that explicit OK, even when the overall $-amount was authorized.
-- **Crypto protective stops are SOFT** (skill-monitored, not a resting order on the exchange) — disclose
-  this **verbatim on every crypto stop**, and that it only fires while Vizier is actively running / at
-  session start (in confirmation mode it will NOT fire on its own; a 24/7 watch needs armed autonomy + a
-  scheduled loop). Never imply an exchange-side stop on a crypto spot position.
+- **Crypto protective stops: prefer the exchange-NATIVE `stop_order`; soft only as fallback.** The
+  crypto Valet (≥0.6.0) has `stop_order` — a resting trigger order ON the exchange that fires with no
+  agent running. Use it for any crypto position that needs protection; most spot venues require
+  `limit_price` (stop-LIMIT) — set it at/slightly below the stop and **disclose the gap risk** (a
+  violent gap can jump the limit). ONLY when the tool refuses (exchange without native stops) fall back
+  to the **SOFT skill-monitored stop**, disclosed **verbatim on every such stop**: skill-monitored, not
+  a resting order, fires only while Vizier is actively running / at session start (in confirmation mode
+  it will NOT fire on its own; a 24/7 watch needs armed autonomy + a scheduled loop). Never imply an
+  exchange-side stop that wasn't actually placed.
 - **Any Valet rejection / SafetyError is a HARD STOP** — never auto-retry; log "blocked, not executed".
   *Exception:* a crypto **below-minimum-notional** rejection is an expected, clean "too small" refusal —
   report it plainly and drop that leg, don't alarm (the exchange minimum is only knowable at send time).
@@ -415,6 +421,21 @@ direction from a level is the same fabrication the verify-before-conceding rule 
   the memory key (crypto always `BASE/QUOTE` with the resolved quote, e.g. `BTC/USDT`) and normalize
   every ticker to it before any thesis/tranche/provenance/reconcile call — exact-string matching will
   miss `BTC` vs `BTC/USDT`.
+- **Performance is MEASURED, not vibed — the `scorecard` command.** When the user asks "how am I
+  doing?" / "is this working?", or at a natural review point (e.g. after closing a thesis), run the
+  deterministic scorecard instead of eyeballing: fetch from Scout (1) a current price for each OPEN
+  thesis ticker and (2) a benchmark `price_history` covering the earliest `open_date` — SPY for the
+  ibkr venue, BTC/USDT (`crypto_price_history`) when crypto theses exist — and pass them in:
+  `scorecard --json '{"as_of":"<today>", "prices":{"AAPL":234.5,…}, "benchmarks":{"ibkr":{"symbol":
+  "SPY","series":[{"date":"…","close":…},…]}, "crypto":{…}}}'`. It returns per-thesis P&L/alpha plus
+  hit rate, win/loss profile and per-horizon/per-venue aggregates; theses it cannot score are NAMED in
+  `skipped` (fix those — usually a missing `qty`). Report the numbers as they come — including when
+  they say the ideas are NOT beating the benchmark; that verdict is the whole point.
+- **Back the memory up: pass `--commit` on memory writes.** The memory dir is its own private git repo
+  with a private remote; every `--commit` also pushes (best-effort — a network failure never blocks the
+  flow). The theses + decision log + NAV series are the track record the scorecard runs on — a disk
+  failure must not erase them. Use `--commit` on `write-thesis`/`close-thesis`/`append-decision`/
+  `nav-snapshot` (skip it only for high-frequency mid-batch writes, then commit once at session end).
 - A short-term sell may only reduce the **`tactical`** tranche (`tranche-sell`); below that, surface the
   contradiction instead of eating the `core`. `trim-qty` (with `"ticker"` + `"tag"`) cross-checks this and
   can return **`tranche_check.allowed == false`** when a tactical trim would eat into the core tranche —

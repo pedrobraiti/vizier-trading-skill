@@ -278,6 +278,26 @@ def list_open_theses(
     return out
 
 
+def list_all_theses(
+    *,
+    memory_dir: str | Path = DEFAULT_MEMORY_DIR,
+) -> list[dict[str, Any]]:
+    """Every thesis, open AND closed — the scorecard's input (closed theses carry
+    the realized outcomes; open ones the marks-to-market). ``EXAMPLE_*`` templates
+    are skipped, same as ``list_open_theses``."""
+    theses_dir = _theses_dir(Path(memory_dir))
+    if not theses_dir.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(theses_dir.glob("*.y*ml")):
+        if path.name.startswith("EXAMPLE_"):
+            continue
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if data:
+            out.append(data)
+    return out
+
+
 def close_thesis(
     ticker: str,
     open_date: str,
@@ -801,6 +821,7 @@ def record_nav_snapshot(
 def compute_drawdown(
     *,
     window_days: int | None = None,
+    venue: str | None = None,
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
 ) -> dict[str, Any]:
     """Peak-to-trough drawdown over the NAV series.
@@ -809,8 +830,26 @@ def compute_drawdown(
     drawdown from the running peak to the latest reading (``current_drawdown_pct``,
     which is what the monthly-drawdown breaker leg consumes). ``window_days``
     keeps only snapshots within that many days of the most recent one.
+
+    NAV is **per venue** (SKILL.md: never mix an IBKR NAV with a crypto-exchange
+    NAV under one denominator). ``venue`` selects one venue's snapshots; when the
+    stored series spans MORE than one venue and no ``venue`` is given, this
+    raises instead of interleaving them — an interleaved series (e.g. $8 IBKR,
+    $1000 crypto, $8 IBKR…) reads as a phantom ~99% drawdown and would trip the
+    breaker on garbage. A single-venue series needs no filter.
     """
     snapshots = _read_jsonl(Path(memory_dir) / NAV_SNAPSHOTS_NAME)
+    if venue is not None:
+        snapshots = [s for s in snapshots if s.get("venue") == venue]
+    else:
+        venues_present = {s.get("venue") for s in snapshots}
+        if len(venues_present) > 1:
+            names = ", ".join(sorted(str(v) for v in venues_present))
+            raise ValueError(
+                f"NAV snapshots span multiple venues ({names}); pass 'venue' to "
+                "compute a per-venue drawdown - mixing venues in one series "
+                "fabricates a drawdown that never happened"
+            )
     series = [
         (datetime.fromisoformat(s["timestamp"]), float(s["net_liquidation"]))
         for s in snapshots
@@ -923,15 +962,22 @@ def commit_memory(
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
     runner: GitRunner | None = None,
     init: bool = True,
+    push: bool = True,
 ) -> None:
-    """Commit the memory directory to its OWN private git repo.
+    """Commit the memory directory to its OWN private git repo — and push it.
 
     The memory is a separate, private repository from the public skill repo:
-    real theses, the decision log and NAV snapshots must never reach GitHub, so
-    they get their own history here. It is created on first use (``git init``).
-    For cloud backup, the user can attach a private remote once::
+    real theses, the decision log and NAV snapshots must never reach GitHub
+    publicly, so they get their own history here. It is created on first use
+    (``git init``). Once a PRIVATE remote is attached (one-time)::
 
-        cd memory && git remote add origin <private-repo-url> && git push -u origin main
+        cd memory && git remote add origin <private-repo-url> && git push -u origin HEAD
+
+    every commit is also pushed — the memory is the project's track record (the
+    scorecard's raw material), and a disk failure must not erase it. The push is
+    BEST-EFFORT by design: it runs after the local commit, a network failure
+    only skips the backup (never breaks a trading flow), and with no remote
+    attached it is a no-op.
 
     Committing is injectable/optional everywhere (writers default ``commit=False``)
     so tests never shell out to git; pass a fake ``runner`` to observe calls.
@@ -943,3 +989,8 @@ def commit_memory(
         run(["init"], memory_dir)
     run(["add", "-A"], memory_dir)
     run(["commit", "-m", message], memory_dir)
+    if push:
+        remotes = run(["remote"], memory_dir)
+        names = (getattr(remotes, "stdout", "") or "").split()
+        if names:
+            run(["push", names[0], "HEAD"], memory_dir)

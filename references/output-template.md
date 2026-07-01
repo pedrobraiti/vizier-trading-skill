@@ -49,9 +49,10 @@ Sources — <primary first (SEC, releases), then aggregators; with as_of where r
   once the fill is confirmed. Never rely on prose to convey whether an order went in.
 - **Unsolicited crypto is called out at confirm.** When the user did NOT mention crypto but the slate
   carries a crypto leg, the confirmation step must flag it EXPLICITLY before any crypto order — name it,
-  its venue and its soft-stop/separate-account nature ("1 of 3 is BTC/USDT on the `crypto` exchange —
-  soft skill-managed stop, separate account — include it?") — and the crypto venue must be okayed. Do
-  not bury an unsolicited crypto leg inside the slate (SKILL.md safety rules).
+  its venue and its separate-account/stop nature ("1 of 3 is BTC/USDT on the `crypto` exchange —
+  separate account; the protective stop is a stop-LIMIT resting on the exchange — include it?") — and
+  the crypto venue must be okayed. Do not bury an unsolicited crypto leg inside the slate (SKILL.md
+  safety rules).
 - **Open with crossed thesis triggers.** If the start-of-session thesis-check found an open thesis that
   crossed its review trigger, that goes at the **TOP**, above everything — never bury it.
 - **Honest price-target scope.** Relay the sell-side consensus as third-party data **plus** at most a
@@ -63,10 +64,12 @@ Sources — <primary first (SEC, releases), then aggregators; with as_of where r
   capital-structure events (raises, dilution, buybacks, M&A). On any execution-grade thesis, state in
   **Risks & caveats** that the news feed may be incomplete for corporate events, and note the dedicated
   recent-filings / capital-structure check you ran (or, if you couldn't run it, that the gap is open).
-- **Crypto protection caveat.** Any crypto position with a stop must carry the line: *"protection is
-  skill-managed (monitoring), not a resting stop on the exchange"* — and, when honest, that in
-  confirmation mode it is only checked when you next run Vizier / at session start, not continuously (a
-  true 24/7 soft stop needs armed autonomy + a scheduled loop).
+- **Crypto protection caveat — say which KIND of stop it is.** With the exchange-native `stop_order`
+  placed: state it rests on the exchange and fires unattended, plus the stop-LIMIT gap risk ("a violent
+  gap can jump the limit"). On the soft fallback (venue without native stops) the old line is mandatory
+  verbatim: *"protection is skill-managed (monitoring), not a resting stop on the exchange"* — and that
+  in confirmation mode it is only checked when you next run Vizier / at session start, not continuously
+  (a true 24/7 soft stop needs armed autonomy + a scheduled loop).
 - **Abstention is a valid Action.** "None — no edge today" is a complete, respectable answer. This holds
   even when the data-sufficiency gate abstains/downsizes **every** candidate — dropping the whole slate is
   a legitimate outcome, not a failure to act. Report "None — no edge today" honestly; don't force a trade

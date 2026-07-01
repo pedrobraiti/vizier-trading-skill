@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import autonomy, data_sufficiency, memory, reconcile, risk
+from . import autonomy, data_sufficiency, memory, reconcile, risk, scorecard
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_PROFILE_PATH = os.environ.get(
@@ -160,7 +160,21 @@ def _cmd_nav_snapshot(payload: dict[str, Any], args: argparse.Namespace) -> Any:
 
 def _cmd_drawdown(payload: dict[str, Any], args: argparse.Namespace) -> Any:
     return memory.compute_drawdown(
-        window_days=payload.get("window_days"), memory_dir=args.memory_dir
+        window_days=payload.get("window_days"),
+        venue=payload.get("venue"),
+        memory_dir=args.memory_dir,
+    )
+
+
+def _cmd_scorecard(payload: dict[str, Any], args: argparse.Namespace) -> Any:
+    if "as_of" not in payload:
+        raise ValueError("missing required field: as_of (ISO date, e.g. 2026-07-01)")
+    return scorecard.compute_scorecard(
+        memory.list_all_theses(memory_dir=args.memory_dir),
+        prices=payload.get("prices"),
+        benchmarks=payload.get("benchmarks"),
+        as_of=payload["as_of"],
+        decision_log=memory.read_decision_log(memory_dir=args.memory_dir),
     )
 
 
@@ -276,6 +290,7 @@ COMMANDS = {
     "append-decision": _cmd_append_decision,
     "nav-snapshot": _cmd_nav_snapshot,
     "drawdown": _cmd_drawdown,
+    "scorecard": _cmd_scorecard,
     "tranches": _cmd_tranches,
     "tranche-sell": _cmd_tranche_sell,
     "reconcile": _cmd_reconcile,
