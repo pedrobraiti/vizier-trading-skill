@@ -196,9 +196,12 @@ ambiguity — never double/triple confirmation of the obvious, never fear of inv
   conviction honestly in the output. For a **MIXED** `allocate` ("$100 into MINE that I named + 2 of your
   best ideas"), tag only the user-named leg with a per-candidate `"explicit": true` (not the call-level
   flag, which would floor-exempt your ideas too), and use `"weighting": "equal"` / per-leg `"weight"` when
-  the user asked to split a fixed way instead of by conviction. A named leg kept this way is still
-  conviction-weighted by its OWN conviction (a low-conviction named pick gets a small slice) — bump its
-  `weight` / use `weighting` if the user wants it funded meaningfully. (See `references/pipeline.md`.)
+  the user asked to split a fixed way instead of by conviction. **Weights are all-or-none:** any `weight`
+  switches the whole call to explicit-weights mode, so give EVERY leg one or none at all — the core
+  rejects a partial set (a weightless leg would otherwise silently get $0). A named leg kept this way is
+  still conviction-weighted by its OWN conviction (a low-conviction named pick gets a small slice) — bump
+  its `weight` (on every leg) / use `weighting` if the user wants it funded meaningfully. (See
+  `references/pipeline.md`.)
 
 **Routing at a glance — on ANY ambiguity, default to the side that does NOT execute.** In a single
 skill, a misread intent can cost a real order, not just "too much research", so the safe default is the

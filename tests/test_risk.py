@@ -197,6 +197,22 @@ def test_allocate_explicit_weights_are_honored_and_caps_still_apply(profile):
     assert result["unallocated"] == pytest.approx(25.0)
 
 
+def test_allocate_partial_weights_rejected(profile):
+    # ANY weight switches the call to explicit-weights mode, where a leg without one
+    # would default to 0 and silently receive $0 — the silent-unfaithfulness class.
+    # Weights are all-or-none; a partial set must fail loudly.
+    with pytest.raises(ValueError, match="every candidate must"):
+        risk.allocate_across_candidates(
+            100,
+            [
+                {"ticker": "AAA", "conviction": 4, "weight": 3},
+                {"ticker": "BBB", "conviction": 4},
+            ],
+            nav=100_000,
+            profile=profile,
+        )
+
+
 def test_allocate_unknown_weighting_raises(profile):
     with pytest.raises(ValueError, match="unknown weighting"):
         risk.allocate_across_candidates(

@@ -266,6 +266,16 @@ def allocate_across_candidates(
         conviction_value = float(candidate.get("conviction", 0))
         if not math.isfinite(conviction_value) or conviction_value < 0:
             raise ValueError("conviction must be non-negative and finite")
+    # Weights are all-or-none: ANY weight switches the whole call to explicit-weights
+    # mode, where a leg without one would default to 0 and silently receive $0 — the
+    # same silent-unfaithfulness class as the degenerate-basis $0 deploy. Fail loudly
+    # instead; the caller either weights every leg or none.
+    weighted_count = sum(1 for c in candidates if "weight" in c)
+    if 0 < weighted_count < len(candidates):
+        raise ValueError(
+            "when any candidate carries 'weight', every candidate must — a leg without "
+            "one would silently be allocated $0 in explicit-weights mode"
+        )
 
     eligible = [
         c for c in candidates if _candidate_is_eligible(c, profile, explicit_order=explicit_order)

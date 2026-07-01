@@ -309,8 +309,10 @@ ask for** (each type has its own minimum; relabelling thin data to a cheaper typ
     funded meaningfully, also bump its `weight` (or pass `weighting`).
   - **Equal split / explicit weights.** `allocate` weights by conviction by DEFAULT. When the user asked
     to "split equally across these", pass **`"weighting": "equal"`**; when they gave explicit per-leg
-    weights, put a **`"weight"`** on each candidate row (overrides conviction-weighting). The per-asset
-    cap still binds in every mode — never hand-weight to dodge it.
+    weights, put a **`"weight"`** on each candidate row (overrides conviction-weighting). Weights are
+    **all-or-none** — any `weight` switches the whole call to explicit-weights mode, so every row must
+    carry one or none at all (the core rejects a partial set; a weightless leg would silently get $0).
+    The per-asset cap still binds in every mode — never hand-weight to dodge it.
 - Limits: `python -m vizier limits --json '{"portfolio":{"nav":..,"cash":..,"positions":[...]}, "candidate":{"ticker":..,"value":..,"sector":..}}'`.
   (For a CURRENT over-weight scan, call it with `"value": 0` per held ticker/sector — see the rebalance
   rule in SKILL.md.) A leg that violates max-position/sector/min-cash or collides with max-%/asset on a

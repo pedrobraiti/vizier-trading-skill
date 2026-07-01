@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-07-01
+
+### Fixed
+- **`allocate` rejects a PARTIAL set of per-candidate weights** (manager code-review finding). Any
+  `weight` switches the whole call to explicit-weights mode, where a leg WITHOUT one defaulted to 0
+  and silently received $0 — the same silent-unfaithfulness class as the degenerate-basis $0 deploy
+  fixed in 0.2.1 (and the `weight_fallback` recovery only fires when ALL weights sum to zero, so the
+  mixed case slipped through). Weights are now all-or-none: give every leg a `weight` or none at
+  all; a partial set raises loudly instead of quietly starving the unweighted legs. SKILL.md and
+  `references/pipeline.md` state the rule where the mixed-`allocate` guidance lives.
+
 ## [0.2.5] - 2026-06-30
 
 ### Fixed
