@@ -29,14 +29,14 @@ researched, risk-checked, journaled trades. It is the one component that touches
 
 - **Brain** — **Vizier** (this repo): decides *what/when*, sizes by conviction, remembers theses between
   sessions, enforces the money-safety rules, and produces the human-readable call.
-- **Senses** — [Scout](https://github.com/pedrobraiti/mcp-market-research): gathers & structures market data
+- **Senses** — [Scout](https://github.com/pedrobraiti/market-research-mcp): gathers & structures market data
   (stateless, data-not-verdict, keyless).
 - **Hands** — [Valet](https://github.com/pedrobraiti/agentic-trading-mcp): executes orders on Interactive
   Brokers (stocks/ETFs) and crypto exchanges (spot, via CCXT).
 
 | Layer | Project | Role |
 |---|---|---|
-| **Senses** | [Scout](https://github.com/pedrobraiti/mcp-market-research) | Gathers & structures market data — stateless, data-not-verdict, keyless (53 tools). |
+| **Senses** | [Scout](https://github.com/pedrobraiti/market-research-mcp) | Gathers & structures market data — stateless, data-not-verdict, keyless (53 tools). |
 | **Hands** | [Valet](https://github.com/pedrobraiti/agentic-trading-mcp) | Executes orders on IBKR (stocks/ETFs, 19 tools) and crypto exchanges (spot, CCXT, 14 tools). |
 | **Brain** | **Vizier** (this repo) | Researches, decides, remembers, orchestrates. The only thing that touches both MCPs. |
 
@@ -143,7 +143,7 @@ shadow (journal / dry-run)  ->  paper / testnet  ->  live read-only  ->  real-mo
 
 First time? The three repos have a dependency order — set them up in this sequence:
 
-1. **Scout** (data MCP — keyless, fast): [`mcp-market-research`](https://github.com/pedrobraiti/mcp-market-research).
+1. **Scout** (data MCP — keyless, fast): [`market-research-mcp`](https://github.com/pedrobraiti/market-research-mcp).
    Gives you research immediately, no accounts or keys.
 2. **Valet** (execution MCP — the longest step): [`agentic-trading-mcp`](https://github.com/pedrobraiti/agentic-trading-mcp).
    For stocks it needs the Interactive Brokers Client Portal Gateway running plus a manual 2FA login;
@@ -182,7 +182,7 @@ ln -s "$(pwd)" ~/.claude/skills/vizier
 In a **new** Claude Code session the skill is available — invoke it in natural language (the trigger is the
 intent, e.g. *"research NVDA"*, *"is my book healthy?"*, *"buy $50 of BTC"*, *"invest $100 across 3 ideas"*,
 or the breadth sweep *"analyze the market and bring me recommendations"* / *"find the best opportunities"*).
-For execution you also need the two MCP servers registered ([Scout](https://github.com/pedrobraiti/mcp-market-research),
+For execution you also need the two MCP servers registered ([Scout](https://github.com/pedrobraiti/market-research-mcp),
 [Valet](https://github.com/pedrobraiti/agentic-trading-mcp)); for research-only the skill degrades gracefully.
 
 > To remove the deployed skill, delete the link: Windows `rmdir "%USERPROFILE%\.claude\skills\vizier"`
@@ -197,7 +197,7 @@ venv python from that repo's own README:
 
 ```bash
 # Scout (research) — one server
-claude mcp add scout  -s user -- "/path/to/mcp-market-research/.venv/bin/python" -m scout.server.app
+claude mcp add scout  -s user -- "/path/to/market-research-mcp/.venv/bin/python" -m scout.server.app
 # Valet (execution) — two servers from the same repo
 claude mcp add ibkr   -s user -- "/path/to/agentic-trading/.venv/bin/python"     -m ibkr_agent.server.app
 claude mcp add crypto -s user -- "/path/to/agentic-trading/.venv/bin/python"     -m crypto_agent.server.app

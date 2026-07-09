@@ -50,7 +50,7 @@ the depth pipeline analyzes the survivors later. Be tight and cited; do not exha
 > names — the Scout research server (registered here as `scout`) plus the read tools — and nothing else.
 > It can NEVER hold an execution tool, because Valet's servers (`ibkr`, `crypto`) are simply not on the
 > list; no future tool, and no Valet re-registration under another name, can leak in. If you registered
-> Scout under a different server name, substitute it here (e.g. `mcp__mcp-market-research`) — Scout's own
+> Scout under a different server name, substitute it here (e.g. `mcp__market-research-mcp`) — Scout's own
 > crypto research tools live under the Scout server, not under `crypto`, so they stay available. The
 > failure mode is now SAFE: a wrong or absent Scout name means the envoy simply gets no market tools and
 > returns empty — it can never reach an execution server. Note `Agent` is deliberately absent too, so an
