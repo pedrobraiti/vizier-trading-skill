@@ -341,9 +341,10 @@ tight. Its findings appear to the user with the recommendation.
 ## Stage 7 — Execute (execution mode only)
 
 Hand to `references/execution-mechanics.md` for the venue order flow and `references/autonomy-and-safety.md`
-for the arming/gate discipline. Then journal the thesis (`write-thesis`, with `baseline_snapshot`) and
-the decision/fills (`append-decision`), record a `nav-snapshot`, and produce the output
-(`references/output-template.md`).
+for the arming/gate discipline. Journal **per leg, before sending the next one** (SKILL.md rule, any
+multi-leg batch, confirmation mode included): after each fill confirms, `append-decision` the fill and
+`write-thesis` (with `baseline_snapshot` + the filled `qty`) for THAT leg. At the end of the round,
+record a `nav-snapshot` and produce the output (`references/output-template.md`).
 
 ---
 

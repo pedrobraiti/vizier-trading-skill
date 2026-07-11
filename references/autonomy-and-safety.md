@@ -97,7 +97,9 @@ Then, **for each candidate in the round:**
    **If you don't journal fills, the §B guarantee goes hollow again** — the gate will under-count spend
    and re-authorize slices it shouldn't. Only `side:"BUY"` value consumes the spend ceiling; any executed
    order counts as a trade. The order is strict: **gate → send → confirm fill → journal → only then gate
-   the next candidate** (never batch the journaling to the end of the round).
+   the next candidate** (never batch the journaling to the end of the round). This journal-per-leg
+   discipline is not autonomy-specific — SKILL.md requires it for ANY multi-leg batch, confirmation
+   mode included (a crash mid-batch must leave journaled fills, not phantom positions).
 
 ## When something trips mid-batch
 

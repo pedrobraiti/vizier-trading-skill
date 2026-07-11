@@ -31,6 +31,11 @@ from typing import Any
 _PERCENT = 100.0
 _HORIZON_TAGS = ("core", "tactical")
 
+# A benchmark series whose last bar sits more than this many days before the
+# thesis window's end is comparing unequal windows (weekends/holidays make a few
+# days of slack normal; more than that means the series was truncated).
+_BENCHMARK_END_GAP_DAYS = 5
+
 
 def _to_date(value: Any) -> date | None:
     """Lenient ISO date: accepts 'YYYY-MM-DD' or a full ISO timestamp (keeps the day)."""
@@ -133,6 +138,19 @@ def _score_thesis(
         else:
             benchmark_return_pct = (bench_end / bench_start - 1.0) * _PERCENT
             alpha_pct = return_pct - benchmark_return_pct
+            # A series truncated at the END passes the start/end lookups (the
+            # last close backfills) but silently compares unequal windows —
+            # annotate the alpha instead of suppressing it (honesty rule: the
+            # number stays, the caveat is named).
+            last_bench_day = bench_series[-1][0]
+            end_gap_days = (end_date - last_bench_day).days
+            if end_gap_days > _BENCHMARK_END_GAP_DAYS:
+                benchmark_note = (
+                    f"benchmark series ends {end_gap_days} days before the thesis "
+                    f"window's end ({last_bench_day.isoformat()} vs "
+                    f"{end_date.isoformat()}); alpha compares unequal windows - "
+                    "kept, but treat with caution"
+                )
 
     return (
         {

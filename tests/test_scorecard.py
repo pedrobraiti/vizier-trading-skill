@@ -71,6 +71,28 @@ def test_benchmark_window_not_covered_yields_null_alpha_with_reason():
     assert "does not cover" in row["benchmark_note"]
 
 
+def test_benchmark_truncated_at_end_keeps_alpha_but_annotates():
+    """REGRESSION: a benchmark series ending well BEFORE the thesis window's end
+    passed silently (the last close backfilled) — alpha compared unequal windows
+    with no note. Annotate, don't suppress."""
+    result = compute_scorecard(
+        [_thesis()], prices={"AAA": 11.0}, benchmarks={"ibkr": SPY}, as_of="2026-07-15"
+    )  # SPY ends 2026-06-01, 44 days before as_of
+    row = result["theses"][0]
+    assert row["alpha_pct"] is not None  # kept — annotated, not suppressed
+    assert row["benchmark_note"] is not None
+    assert "unequal windows" in row["benchmark_note"]
+
+
+def test_benchmark_covering_the_window_has_no_note():
+    result = compute_scorecard(
+        [_thesis()], prices={"AAA": 11.0}, benchmarks={"ibkr": SPY}, as_of="2026-06-01"
+    )
+    row = result["theses"][0]
+    assert row["alpha_pct"] is not None
+    assert row["benchmark_note"] is None
+
+
 def test_crypto_ticker_routes_to_crypto_benchmark():
     btc_bench = {
         "symbol": "BTC/USDT",

@@ -125,6 +125,208 @@ def test_update_last_reviewed(memory_dir):
     assert updated["last_reviewed"] == "2026-03-01"
 
 
+# ── Same-day lots: no silent clobber (Z1) ────────────────────────────────────
+
+
+def test_two_same_day_lots_coexist_and_tranches_sum_both(memory_dir):
+    """REGRESSION: core qty=5 then tactical qty=3 on the SAME ticker+day used to
+    collapse into ONE file ({ticker}-{open_date}.yaml overwritten silently) — the
+    tranche guard then approved sells against a phantom balance missing the core."""
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=5),
+        memory_dir=memory_dir,
+    )
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="tactical", qty=3),
+        memory_dir=memory_dir,
+    )
+    files = sorted(p.name for p in (memory_dir / "theses").glob("ACME-2026-03-01*"))
+    assert files == ["ACME-2026-03-01-tactical.yaml", "ACME-2026-03-01.yaml"]
+    assert memory.tranche_balances("ACME", memory_dir=memory_dir) == {
+        "core": 5.0,
+        "tactical": 3.0,
+    }
+
+
+def test_write_thesis_never_lands_on_an_existing_file(memory_dir):
+    """A duplicate write (same ticker/date/tag) must not clobber the stored lot:
+    the first record survives byte-identical; the second lands on a new name."""
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=5),
+        memory_dir=memory_dir,
+    )
+    first = memory_dir / "theses" / "ACME-2026-03-01.yaml"
+    original = first.read_text(encoding="utf-8")
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=99),
+        memory_dir=memory_dir,
+    )
+    assert first.read_text(encoding="utf-8") == original  # untouched
+    assert (memory_dir / "theses" / "ACME-2026-03-01-core.yaml").exists()
+
+
+def test_third_same_tag_lot_gets_numeric_suffix(memory_dir):
+    for qty in (5, 6, 7):
+        memory.write_thesis(
+            _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=qty),
+            memory_dir=memory_dir,
+        )
+    assert (memory_dir / "theses" / "ACME-2026-03-01-core-2.yaml").exists()
+    balances = memory.tranche_balances("ACME", memory_dir=memory_dir)
+    assert balances["core"] == 18.0  # 5 + 6 + 7 all counted
+
+
+def test_write_thesis_overwrite_updates_in_place(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=5),
+        memory_dir=memory_dir,
+    )
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=8),
+        overwrite=True,
+        memory_dir=memory_dir,
+    )
+    files = list((memory_dir / "theses").glob("ACME-2026-03-01*"))
+    assert len(files) == 1  # updated in place, no second lot
+    assert memory.read_thesis("ACME", "2026-03-01", memory_dir=memory_dir)["qty"] == 8
+
+
+def test_write_thesis_overwrite_without_existing_record_raises(memory_dir):
+    with pytest.raises(FileNotFoundError, match="no thesis"):
+        memory.write_thesis(
+            _sample_thesis(ticker="ACME", open_date="2026-03-01"),
+            overwrite=True,
+            memory_dir=memory_dir,
+        )
+
+
+def test_read_thesis_ambiguous_same_day_requires_horizon_tag(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=5),
+        memory_dir=memory_dir,
+    )
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="tactical", qty=3),
+        memory_dir=memory_dir,
+    )
+    with pytest.raises(ValueError, match="horizon_tag"):
+        memory.read_thesis("ACME", "2026-03-01", memory_dir=memory_dir)
+    tactical = memory.read_thesis(
+        "ACME", "2026-03-01", horizon_tag="tactical", memory_dir=memory_dir
+    )
+    assert tactical["qty"] == 3
+
+
+def test_close_thesis_disambiguates_by_horizon_tag(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=5),
+        memory_dir=memory_dir,
+    )
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="tactical", qty=3),
+        memory_dir=memory_dir,
+    )
+    with pytest.raises(ValueError, match="horizon_tag"):
+        memory.close_thesis(
+            "ACME", "2026-03-01", close_date="2026-03-10", exit_price=150.0,
+            realized_pnl=20.0, memory_dir=memory_dir,
+        )
+    closed = memory.close_thesis(
+        "ACME", "2026-03-01", close_date="2026-03-10", exit_price=150.0,
+        realized_pnl=20.0, horizon_tag="tactical", memory_dir=memory_dir,
+    )
+    assert closed["horizon_tag"] == "tactical"
+    # The core lot is untouched and still open.
+    assert memory.tranche_balances("ACME", memory_dir=memory_dir) == {
+        "core": 5.0,
+        "tactical": 0.0,
+    }
+
+
+def test_legacy_base_filename_still_read_and_closed(memory_dir):
+    """Backward compat: files written by the old fixed-path scheme keep working."""
+    legacy = memory_dir / "theses" / "OLDCO-2026-01-10.yaml"
+    record = _sample_thesis(ticker="OLDCO", open_date="2026-01-10", qty=4)
+    record["status"] = "open"
+    import yaml as _yaml
+
+    legacy.write_text(_yaml.safe_dump(record, sort_keys=False), encoding="utf-8")
+    assert memory.read_thesis("OLDCO", "2026-01-10", memory_dir=memory_dir)["qty"] == 4
+    closed = memory.close_thesis(
+        "OLDCO", "2026-01-10", close_date="2026-02-01", exit_price=1.0,
+        realized_pnl=0.0, memory_dir=memory_dir,
+    )
+    assert closed["status"] == "closed"
+
+
+# ── reduce_thesis_qty: partial-sell bookkeeping (Z2) ─────────────────────────
+
+
+def test_reduce_thesis_qty_decrements_and_updates_tranche(memory_dir):
+    """REGRESSION: after a trim there was NO way to decrement the thesis qty, so
+    the tranche guard kept approving sells against the pre-trim phantom balance."""
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="tactical", qty=5),
+        memory_dir=memory_dir,
+    )
+    result = memory.reduce_thesis_qty("ACME", "2026-03-01", 2, memory_dir=memory_dir)
+    assert result["previous_qty"] == 5.0
+    assert result["remaining_qty"] == 3.0
+    assert memory.tranche_balances("ACME", memory_dir=memory_dir)["tactical"] == 3.0
+    # The guard now blocks a sell that the phantom balance would have approved.
+    assert memory.check_tranche_sell("ACME", "tactical", 4, memory_dir=memory_dir)[
+        "allowed"
+    ] is False
+
+
+def test_reduce_thesis_qty_to_zero_points_to_close_thesis(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", qty=5),
+        memory_dir=memory_dir,
+    )
+    result = memory.reduce_thesis_qty("ACME", "2026-03-01", 5, memory_dir=memory_dir)
+    assert result["remaining_qty"] == 0.0
+    assert "close-thesis" in result["note"]
+    # NOT auto-closed: exit_price/realized_pnl belong to close_thesis.
+    assert memory.read_thesis("ACME", "2026-03-01", memory_dir=memory_dir)["status"] == "open"
+
+
+def test_reduce_thesis_qty_below_zero_raises(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", qty=5),
+        memory_dir=memory_dir,
+    )
+    with pytest.raises(ValueError, match="below zero"):
+        memory.reduce_thesis_qty("ACME", "2026-03-01", 6, memory_dir=memory_dir)
+
+
+def test_reduce_thesis_qty_rejects_non_positive_sale(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", qty=5),
+        memory_dir=memory_dir,
+    )
+    with pytest.raises(ValueError, match="positive"):
+        memory.reduce_thesis_qty("ACME", "2026-03-01", 0, memory_dir=memory_dir)
+
+
+def test_reduce_thesis_qty_disambiguates_by_horizon_tag(memory_dir):
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="core", qty=10),
+        memory_dir=memory_dir,
+    )
+    memory.write_thesis(
+        _sample_thesis(ticker="ACME", open_date="2026-03-01", horizon_tag="tactical", qty=5),
+        memory_dir=memory_dir,
+    )
+    memory.reduce_thesis_qty(
+        "ACME", "2026-03-01", 2, horizon_tag="tactical", memory_dir=memory_dir
+    )
+    assert memory.tranche_balances("ACME", memory_dir=memory_dir) == {
+        "core": 10.0,
+        "tactical": 3.0,
+    }
+
+
 # ── Tranche accounting (spec, §D) ────────────────────────────────────────────
 
 
@@ -259,6 +461,20 @@ def test_compute_drawdown_over_nav_series(memory_dir):
     assert dd["max_drawdown_pct"] == pytest.approx(200 / 1_100 * 100, rel=1e-6)
     # Latest 950 vs running peak 1100 = ~13.6% current drawdown.
     assert dd["current_drawdown_pct"] == pytest.approx(150 / 1_100 * 100, rel=1e-6)
+
+
+def test_compute_drawdown_handles_mixed_naive_and_aware_timestamps(memory_dir):
+    """REGRESSION: one naive timestamp in the series used to TypeError against
+    the aware ones at sort time — the breaker lost its whole drawdown leg."""
+    memory.record_nav_snapshot(
+        1_000, timestamp="2026-01-01T00:00:00+00:00", memory_dir=memory_dir
+    )
+    memory.record_nav_snapshot(
+        900, timestamp="2026-01-02T00:00:00", memory_dir=memory_dir  # naive
+    )
+    dd = memory.compute_drawdown(memory_dir=memory_dir)
+    assert dd["samples"] == 2
+    assert dd["current_drawdown_pct"] == pytest.approx(10.0)
 
 
 def test_compute_drawdown_empty_series_is_zero(memory_dir):

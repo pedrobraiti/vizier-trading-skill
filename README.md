@@ -9,9 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/pedrobraiti/vizier-trading-skill/actions/workflows/ci.yml"><img src="https://github.com/pedrobraiti/vizier-trading-skill/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
-  <img src="https://img.shields.io/badge/core-117%20tests-brightgreen" alt="117 tests">
+  <img src="https://img.shields.io/badge/core-153%20tests-brightgreen" alt="153 tests">
   <img src="https://img.shields.io/badge/posture-paper--first-orange" alt="Posture: paper-first">
 </p>
 
@@ -36,8 +37,8 @@ researched, risk-checked, journaled trades. It is the one component that touches
 
 | Layer | Project | Role |
 |---|---|---|
-| **Senses** | [Scout](https://github.com/pedrobraiti/market-research-mcp) | Gathers & structures market data — stateless, data-not-verdict, keyless (53 tools). |
-| **Hands** | [Valet](https://github.com/pedrobraiti/agentic-trading-mcp) | Executes orders on IBKR (stocks/ETFs, 19 tools) and crypto exchanges (spot, CCXT, 14 tools). |
+| **Senses** | [Scout](https://github.com/pedrobraiti/market-research-mcp) | Gathers & structures market data — stateless, data-not-verdict, keyless (60+ tools). |
+| **Hands** | [Valet](https://github.com/pedrobraiti/agentic-trading-mcp) | Executes orders on IBKR (stocks/ETFs, 20 tools) and crypto exchanges (spot, CCXT, 16 tools). |
 | **Brain** | **Vizier** (this repo) | Researches, decides, remembers, orchestrates. The only thing that touches both MCPs. |
 
 > **The inviolable boundary.** The MCPs are deliberately dumb (I/O without judgment). Vizier **consumes**
@@ -100,6 +101,60 @@ flowchart LR
 
 Research mode stops at *"Trader proposes"*; execution mode continues through the gates to Valet, then
 journals the thesis and the fills.
+
+<details>
+<summary><strong>What a session looks like</strong> (illustrative excerpt, paper account)</summary>
+
+```
+MODE: PAPER · venue: ibkr
+
+TL;DR — Buy $60 NVDA (core) + $40 XLE (tactical); breaker clear, book has room in both.
+
+By horizon
+  • Long  — NVDA: datacenter capex still accelerating; quality metrics intact
+  • Short — NVDA: RSI 71, extended — divergence flagged: scale-in, don't chase
+
+Action
+  • NVDA — ibkr, BUY $60, market (liquid large-cap)   [EXECUTED — order id 1247]
+  • XLE  — ibkr, BUY $40, limit 92.10                 [EXECUTED — order id 1248]
+
+Conviction — NVDA 4/5 (secular + earnings momentum) · XLE 3/5 (honest: a hedge, not a hero)
+
+Scenarios + price target (NVDA)
+  • Bear $95 · Base $128 (analyst consensus relay, n=42) · Bull $150
+  (crude multiple cross-check flagged as crude — no independent valuation claimed)
+
+Risks & caveats — news feed may be incomplete for corporate events (8-K check run: clean);
+  data-sufficiency on XLE: thin positioning data — annotated, amount honored
+
+Pre-mortem — buying an extended name near an earnings window (checked: 24 days out)
+
+Post-trade portfolio — NVDA 8.2% · XLE 5.5% · cash 22% · 6 positions
+
+Sources — SEC filings (as_of 2026-05-28), FRED, IBKR quotes 14:31 ET
+```
+
+The full format (mandatory MODE banner, per-name `[RECOMMENDATION]`/`[EXECUTED]` tags, honest-caveat
+rules) is specified in [`references/output-template.md`](references/output-template.md).
+
+</details>
+
+## Measuring edge — the scorecard
+
+"Is this actually working?" is answered by a **deterministic `scorecard`**, not by vibes. The skill
+feeds it current prices and a benchmark price history (SPY for equities, BTC/USDT for crypto) and the
+core computes, over **every** thesis (open marked-to-market + closed on recorded outcomes):
+
+- **P&L and period return per thesis**, with `days_held` reported so a 3-day tactical and a 6-month
+  core are weighed by the reader — **no annualization** (annualizing both into one number is nonsense).
+- **Hit rate and win/loss profile** over closed theses; aggregates overall, per horizon and per venue.
+- **Alpha vs the benchmark over the SAME window** as each thesis — the number that separates "the brain
+  has edge" from "it just rode the market".
+
+The honesty rules are the point: a thesis that can't be scored is **named in `skipped`** (never guessed),
+an aggregate with no sample is **null, not a fake zero**, and a benchmark that doesn't cover the window
+yields a null or annotated alpha with the reason attached. If the ideas are not beating the benchmark,
+the scorecard says exactly that — that verdict is what the paper-first ladder exists to produce.
 
 ## The safety model (code-enforced, fail-closed)
 
@@ -265,7 +320,7 @@ the horizon, the quantitative baseline to diff against. That state is **private*
 ## Development
 
 ```bash
-pytest -q          # 117 offline tests (deterministic, no network, no real git)
+pytest -q          # 153 offline tests (deterministic, no network, no real git)
 ruff check .       # lint
 ```
 

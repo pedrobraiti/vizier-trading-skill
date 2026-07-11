@@ -124,6 +124,85 @@ def _thesis_path(ticker: str, open_date: str, memory_dir: Path) -> Path:
     return _theses_dir(memory_dir) / f"{_safe_ticker(ticker)}-{open_date}.yaml"
 
 
+# Same-day lots share the {ticker}-{open_date} prefix; beyond the base name the
+# writer suffixes the horizon tag and then a numeric counter. The cap is a
+# sanity bound, not a product limit — 10+ same-day lots of one ticker is a bug.
+_MAX_SAME_DAY_LOTS = 9
+
+
+def _thesis_matches(
+    ticker: str, open_date: str, memory_dir: Path
+) -> list[Path]:
+    """Every stored file for this ticker+open_date: the legacy base name plus
+    any same-day-lot variants (``-{tag}``, ``-{tag}-2`` …)."""
+    theses_dir = _theses_dir(memory_dir)
+    if not theses_dir.exists():
+        return []
+    return sorted(theses_dir.glob(f"{_safe_ticker(ticker)}-{open_date}*.y*ml"))
+
+
+def _locate_thesis(
+    ticker: str,
+    open_date: str,
+    memory_dir: Path,
+    *,
+    horizon_tag: str | None = None,
+) -> Path:
+    """Resolve ticker+open_date to EXACTLY one stored thesis file.
+
+    Same-day lots (spec §D) can put several files under one ticker+date; when
+    the call does not distinguish them, guessing would silently act on the
+    wrong lot — so ambiguity is a loud error asking for ``horizon_tag``.
+    Backward-compatible: legacy ``{ticker}-{open_date}.yaml`` files match too.
+    """
+    matches = _thesis_matches(ticker, open_date, memory_dir)
+    if not matches:
+        raise FileNotFoundError(f"no thesis for {ticker} opened {open_date}")
+    if horizon_tag is not None:
+        matches = [
+            path
+            for path in matches
+            if (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("horizon_tag")
+            == horizon_tag
+        ]
+        if not matches:
+            raise FileNotFoundError(
+                f"no thesis for {ticker} opened {open_date} with horizon_tag "
+                f"{horizon_tag!r}"
+            )
+    if len(matches) > 1:
+        names = ", ".join(path.name for path in matches)
+        raise ValueError(
+            f"multiple theses for {ticker} opened {open_date} ({names}); pass "
+            "'horizon_tag' to disambiguate which lot this call targets"
+        )
+    return matches[0]
+
+
+def _next_free_thesis_path(
+    ticker: str, open_date: str, horizon_tag: str, memory_dir: Path
+) -> Path:
+    """First unused filename for a NEW lot: base name, then ``-{tag}``, then
+    ``-{tag}-2`` … — a write must NEVER land on an existing file (the silent
+    clobber that used to merge two same-day lots into one)."""
+    base = _thesis_path(ticker, open_date, memory_dir)
+    if not base.exists():
+        return base
+    stem = f"{_safe_ticker(ticker)}-{open_date}-{horizon_tag}"
+    tagged = _theses_dir(memory_dir) / f"{stem}.yaml"
+    if not tagged.exists():
+        return tagged
+    for counter in range(2, _MAX_SAME_DAY_LOTS + 1):
+        candidate = _theses_dir(memory_dir) / f"{stem}-{counter}.yaml"
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(
+        f"refusing to write: {_MAX_SAME_DAY_LOTS}+ same-day lots already exist for "
+        f"{ticker} opened {open_date} ({horizon_tag}) - this looks like a runaway "
+        "duplicate write; pass overwrite=True to update an existing record instead"
+    )
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a JSONL file, tolerating malformed lines.
 
@@ -215,15 +294,25 @@ def _validate_thesis(thesis: dict[str, Any]) -> None:
 def write_thesis(
     thesis: dict[str, Any],
     *,
+    overwrite: bool = False,
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
     commit: bool = False,
     runner: GitRunner | None = None,
 ) -> Path:
-    """Persist a thesis to ``theses/{ticker}-{open_date}.yaml``.
+    """Persist a thesis under ``theses/`` — NEVER silently clobbering a lot.
 
     Defaults ``status`` to ``open`` and stamps ``last_reviewed`` with the open
     date if absent. Validates the required §F fields up front so a malformed
     thesis fails loudly rather than corrupting the store.
+
+    Overwrite discipline: the same ticker can legitimately open TWO lots on one
+    day (a ``core`` and a ``tactical`` tranche — spec §D), and the old fixed
+    ``{ticker}-{open_date}.yaml`` path made the second write silently erase the
+    first (the tranche guard then approved sells against a phantom balance).
+    Now a new lot always lands on a FREE filename (base name, then
+    ``-{horizon_tag}``, then ``-{tag}-2`` …). A deliberate update of an existing
+    record requires ``overwrite=True``, which locates the stored lot (by
+    ticker+open_date+this record's horizon_tag) and rewrites it in place.
     """
     memory_dir = Path(memory_dir)
     record = dict(thesis)
@@ -232,7 +321,17 @@ def write_thesis(
     record.setdefault("cash_qty", None)
     _validate_thesis(record)
 
-    path = _thesis_path(record["ticker"], record["open_date"], memory_dir)
+    if overwrite:
+        path = _locate_thesis(
+            record["ticker"],
+            record["open_date"],
+            memory_dir,
+            horizon_tag=record["horizon_tag"],
+        )
+    else:
+        path = _next_free_thesis_path(
+            record["ticker"], record["open_date"], record["horizon_tag"], memory_dir
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True),
@@ -251,11 +350,12 @@ def read_thesis(
     ticker: str,
     open_date: str,
     *,
+    horizon_tag: str | None = None,
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
 ) -> dict[str, Any]:
-    path = _thesis_path(ticker, open_date, Path(memory_dir))
-    if not path.exists():
-        raise FileNotFoundError(f"no thesis for {ticker} opened {open_date}")
+    path = _locate_thesis(
+        ticker, open_date, Path(memory_dir), horizon_tag=horizon_tag
+    )
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
@@ -307,14 +407,17 @@ def close_thesis(
     realized_pnl: float,
     alpha_vs_spy: float | None = None,
     lesson: str | None = None,
+    horizon_tag: str | None = None,
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
     commit: bool = False,
     runner: GitRunner | None = None,
 ) -> dict[str, Any]:
     """Close a thesis in place, adding the §F realized-outcome fields. The
-    baseline_snapshot and the rest of the open record are preserved untouched."""
+    baseline_snapshot and the rest of the open record are preserved untouched.
+    With several same-day lots, ``horizon_tag`` picks which one to close."""
     memory_dir = Path(memory_dir)
-    record = read_thesis(ticker, open_date, memory_dir=memory_dir)
+    path = _locate_thesis(ticker, open_date, memory_dir, horizon_tag=horizon_tag)
+    record = yaml.safe_load(path.read_text(encoding="utf-8"))
     record.update(
         status="closed",
         close_date=close_date,
@@ -323,7 +426,6 @@ def close_thesis(
         alpha_vs_spy=alpha_vs_spy,
         lesson=lesson,
     )
-    path = _thesis_path(ticker, open_date, memory_dir)
     path.write_text(
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -342,15 +444,16 @@ def update_last_reviewed(
     open_date: str,
     *,
     reviewed_at: str | None = None,
+    horizon_tag: str | None = None,
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
     commit: bool = False,
     runner: GitRunner | None = None,
 ) -> dict[str, Any]:
     """Stamp a thesis with the last time the thesis-check ran against it."""
     memory_dir = Path(memory_dir)
-    record = read_thesis(ticker, open_date, memory_dir=memory_dir)
+    path = _locate_thesis(ticker, open_date, memory_dir, horizon_tag=horizon_tag)
+    record = yaml.safe_load(path.read_text(encoding="utf-8"))
     record["last_reviewed"] = reviewed_at or _now_iso()
-    path = _thesis_path(ticker, open_date, memory_dir)
     path.write_text(
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -362,6 +465,69 @@ def update_last_reviewed(
         runner=runner,
     )
     return record
+
+
+def reduce_thesis_qty(
+    ticker: str,
+    open_date: str,
+    qty_sold: float,
+    *,
+    horizon_tag: str | None = None,
+    memory_dir: str | Path = DEFAULT_MEMORY_DIR,
+    commit: bool = False,
+    runner: GitRunner | None = None,
+) -> dict[str, Any]:
+    """Decrement a thesis ``qty`` after an EXECUTED partial sell (a trim).
+
+    The tranche guard (`check_tranche_sell`) approves sells against the summed
+    thesis ``qty``; without this bookkeeping a trim leaves the store showing a
+    phantom balance the guard would happily approve against. Call it with the
+    quantity that actually FILLED, right after confirming the trim.
+
+    Never closes the thesis on its own: a qty that reaches exactly 0 returns a
+    note pointing to ``close_thesis`` — the exit price and realized P&L belong
+    to the close, not to a quantity decrement.
+    """
+    if qty_sold <= 0:
+        raise ValueError(f"qty_sold must be positive, got {qty_sold!r}")
+    memory_dir = Path(memory_dir)
+    path = _locate_thesis(ticker, open_date, memory_dir, horizon_tag=horizon_tag)
+    record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    previous_qty = float(record.get("qty") or 0.0)
+    remaining = previous_qty - float(qty_sold)
+    if remaining < -1e-9:
+        raise ValueError(
+            f"cannot reduce {ticker} ({record.get('horizon_tag')}) qty below zero: "
+            f"thesis holds {previous_qty:g}, sale was {qty_sold:g} - reconcile the "
+            "fill against the thesis store before journaling"
+        )
+    remaining = max(remaining, 0.0)
+    record["qty"] = remaining
+    path.write_text(
+        yaml.safe_dump(record, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    _maybe_commit(
+        f"thesis: reduce {ticker} qty by {qty_sold:g}",
+        memory_dir=memory_dir,
+        commit=commit,
+        runner=runner,
+    )
+    result = {
+        "path": str(path),
+        "ticker": record.get("ticker"),
+        "horizon_tag": record.get("horizon_tag"),
+        "open_date": record.get("open_date"),
+        "previous_qty": previous_qty,
+        "qty_sold": float(qty_sold),
+        "remaining_qty": remaining,
+    }
+    if remaining == 0.0:
+        result["note"] = (
+            "qty is now 0 - run close-thesis to record the exit_price/realized_pnl "
+            "(reduce-thesis-qty never closes on its own)"
+        )
+    return result
 
 
 # ── Decision log ─────────────────────────────────────────────────────────────
@@ -850,10 +1016,13 @@ def compute_drawdown(
                 "compute a per-venue drawdown - mixing venues in one series "
                 "fabricates a drawdown that never happened"
             )
+    # _parse_dt (not raw fromisoformat): a naive timestamp in one snapshot would
+    # otherwise TypeError against the aware ones at sort time, killing the
+    # breaker's whole drawdown leg over a formatting detail.
     series = [
-        (datetime.fromisoformat(s["timestamp"]), float(s["net_liquidation"]))
+        (_parse_dt(s["timestamp"]), float(s["net_liquidation"]))
         for s in snapshots
-        if s.get("net_liquidation") is not None
+        if s.get("net_liquidation") is not None and s.get("timestamp") is not None
     ]
     series.sort(key=lambda pair: pair[0])
 

@@ -1,6 +1,6 @@
 [project]
 name = "vizier"
-version = "0.3.0"
+version = "0.4.0"
 description = "Vizier — the brain of an agentic-trading stack: deterministic safety/state helpers for the /vizier Claude Code skill."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -131,10 +131,19 @@ per name — still listing it — rather than coming in under the requested N.
 
 ## Performance summary (periodic, folded into the morning brief when enabled)
 
-Return vs SPY, P&L per thesis, hit rate. This is how the user answers "how am I doing?" — content fixed,
-exact cadence/format left to the moment. The numbers come from **closed** theses: `list-theses` returns
-only OPEN ones, so read the closed records from `memory/theses/*.yaml` with `status: closed` and use
-their stored `realized_pnl` / `alpha_vs_spy` (which were computed at close, not re-derived now). Do
-**not** free-hand P&L/alpha math in the output. (A deterministic closed-thesis aggregator — hit rate,
-total P&L, alpha — is the cleaner home for this and is on the roadmap; until it lands, read the closed
-records and present their stored fields rather than recomputing.)
+Return vs benchmark, P&L per thesis, hit rate. This is how the user answers "how am I doing?" — content
+fixed, exact cadence/format left to the moment. The numbers come from the deterministic **`scorecard`**
+command, never from free-hand math (Rule #2): fetch from Scout a current price per OPEN thesis ticker
+plus a benchmark `price_history` covering the earliest `open_date` (SPY for `ibkr`, BTC/USDT for
+crypto), then
+
+```bash
+python -m vizier scorecard --json '{"as_of":"<today>", "prices":{"AAPL":234.5}, "benchmarks":{"ibkr":{"symbol":"SPY","series":[{"date":"...","close":...}]}}}'
+```
+
+It scores every thesis (open marked-to-market, closed on the recorded `realized_pnl`) and aggregates
+hit rate, win/loss profile and same-window alpha — overall, per horizon and per venue. Present its
+numbers as they come: theses it cannot score are NAMED in `skipped` (surface them — usually a missing
+`qty`), null aggregates mean "no sample" (never report them as zero), and read any `benchmark_note`
+out loud (an uncovered or truncated benchmark window caveats the alpha). Exact payload details:
+SKILL.md "Performance is MEASURED, not vibed".

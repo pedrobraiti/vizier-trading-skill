@@ -4,6 +4,67 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-11
+
+### Added
+- **`reduce-thesis-qty` — partial-sell bookkeeping (closes the phantom-balance hole).** There was no
+  way to decrement a thesis `qty` after an executed trim, so the tranche guard kept approving sells
+  against the pre-trim quantity — a balance the account no longer held. The new command
+  (`{"ticker", "open_date", "qty_sold"}`, optional `horizon_tag`, `--commit` like the other writers)
+  decrements the stored `qty` and refuses to go below zero. It deliberately never closes the thesis:
+  a qty that reaches 0 returns a note pointing to `close-thesis`, which owns `exit_price`/
+  `realized_pnl`. SKILL.md's memory discipline and `references/execution-mechanics.md` now instruct
+  running it right after any trim fill.
+- **`write-thesis` gained `overwrite` (deliberate update) and the readers gained `horizon_tag`
+  (same-day-lot disambiguation)** — see the Fixed entry below for why.
+
+### Fixed
+- **`write_thesis` no longer silently clobbers a same-day lot of the same ticker.** The store keyed
+  theses on the fixed `{ticker}-{open_date}.yaml` path, so opening a `core` and a `tactical` lot of one
+  ticker on the same day (the §D tranche design's own legitimate case) left ONE file — the second write
+  erased the first, and tranche accounting then approved sells against a balance missing the erased lot.
+  A write now never lands on an existing file: a new lot gets a free name (base, then `-{horizon_tag}`,
+  then a numeric suffix), and a deliberate update requires `overwrite: true`. `read-thesis`/
+  `close-thesis`/`reduce-thesis-qty`/`update-reviewed` locate lots by glob (old-format files keep
+  working) and, when one ticker+date holds several lots, an ambiguous call errors loudly asking for
+  `horizon_tag` instead of guessing which lot to touch.
+- **`drawdown` no longer crashes on a naive NAV timestamp.** `compute_drawdown` parsed timestamps with
+  raw `fromisoformat`, so one snapshot written without a timezone made the aware-vs-naive comparison
+  TypeError at sort time — killing the circuit breaker's whole drawdown leg over a formatting detail.
+  It now normalizes through the module's own `_parse_dt` (naive = UTC).
+- **`scorecard` annotates a benchmark series truncated at the END of the window.** The coverage check
+  only protected the start: a benchmark ending weeks before the thesis window's end silently backfilled
+  the last close and compared unequal windows. Consistent with the annotate-don't-suppress rule, the
+  alpha is kept and `benchmark_note` now names the gap when the series ends more than ~5 days short.
+- **`references/execution-mechanics.md` caught up with Valet v0.6.0.** The venue cheatsheet said IBKR
+  19 tools / crypto 14 with `stop_order` ABSENT — while its own stop guidance (correctly) told you to
+  prefer the crypto-native `stop_order`. Now: IBKR **20** tools (adds `reconcile_pending`), crypto
+  **16** (adds `stop_order` + `reconcile_pending`), and the absent list is the real 4
+  (`preview_order`, `trailing_stop`, `bracket_order`, `wait_for_fill`).
+- **`references/output-template.md` performance section pointed at the pre-scorecard world** ("an
+  aggregator is on the roadmap; until it lands, read the closed records by hand"). It now routes "how
+  am I doing?" through the deterministic `scorecard` command, matching SKILL.md.
+- **`references/anchor-example.md` modeled the wrong explicit-order pattern.** The canonical trace
+  passed the call-level `"explicit_order": true` to `allocate` for a 100% skill-derived slate — exactly
+  what SKILL.md warns floor-exempts Vizier's own ideas — and told the reader a gate may "drop the leg
+  even under the explicit order" without saying why that isn't a contract breach. The trace now keeps
+  the flag off (the $100 total and the count are the contract; the names are skill-derived, so the
+  floor applies and the shortlist backfills) and explains the annotate-vs-prune boundary in place.
+
+### Changed
+- **Journal-per-leg is now the rule for ANY multi-leg batch, confirmation mode included.** The
+  discipline existed only in the autonomy loop, while the canonical confirmation trace journaled all
+  three legs at the end — a crash mid-batch would leave confirmed fills with no journal (phantom
+  positions). SKILL.md states the general rule, and the anchor trace journals each leg
+  (`append-decision` + `write-thesis`) before sending the next.
+- **The Valet hard stop got an explicit scope** (SKILL.md): a rejection/SafetyError halts the
+  REMAINING legs; report what filled and what didn't; never unwind an already-filled leg on your own.
+- **SKILL.md no longer hardcodes the maintainer's name** — the skill is public and installable by
+  anyone, so "the sovereign" is simply the user.
+- **README refresh:** live GitHub Actions CI badge, real test count, updated sibling-repo tool counts
+  (worded not to re-age), a "Measuring edge — the scorecard" section, and a collapsible example of a
+  `/vizier` session output (labeled illustrative/paper).
+
 ## [0.3.0] - 2026-07-01
 
 ### Added

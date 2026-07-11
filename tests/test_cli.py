@@ -172,6 +172,72 @@ def test_cli_trim_qty_with_tranche_check(capsys, memory_dir):
     assert env["data"]["tranche_check"]["allowed"] is True  # 1.5 <= 5 tactical
 
 
+def test_cli_reduce_thesis_qty_roundtrip(capsys, memory_dir):
+    thesis = {
+        "ticker": "ACME", "horizon_tag": "tactical", "open_date": "2026-01-15",
+        "entry_price": 100.0, "qty": 5, "conviction": 3, "thesis_one_liner": "x",
+        "reason": "y", "main_risk": "z", "review_trigger": {"type": "price", "value": 80.0},
+        "review_trigger_is_hard_stop": False, "baseline_snapshot": {"price": 100.0},
+    }
+    _run(capsys, ["write-thesis", "--memory-dir", str(memory_dir), "--json", json.dumps(thesis)])
+
+    env = _run(
+        capsys,
+        ["reduce-thesis-qty", "--memory-dir", str(memory_dir), "--json",
+         json.dumps({"ticker": "ACME", "open_date": "2026-01-15", "qty_sold": 2})],
+    )
+    assert env["ok"] is True
+    assert env["data"]["remaining_qty"] == 3.0
+
+    tranches = _run(
+        capsys,
+        ["tranches", "--memory-dir", str(memory_dir), "--json",
+         json.dumps({"ticker": "ACME"})],
+    )
+    assert tranches["data"]["tactical"] == 3.0
+
+
+def test_cli_reduce_thesis_qty_below_zero_is_clean_error(capsys, memory_dir):
+    thesis = {
+        "ticker": "ACME", "horizon_tag": "tactical", "open_date": "2026-01-15",
+        "entry_price": 100.0, "qty": 5, "conviction": 3, "thesis_one_liner": "x",
+        "reason": "y", "main_risk": "z", "review_trigger": {"type": "price", "value": 80.0},
+        "review_trigger_is_hard_stop": False, "baseline_snapshot": {"price": 100.0},
+    }
+    _run(capsys, ["write-thesis", "--memory-dir", str(memory_dir), "--json", json.dumps(thesis)])
+    env = _run(
+        capsys,
+        ["reduce-thesis-qty", "--memory-dir", str(memory_dir), "--json",
+         json.dumps({"ticker": "ACME", "open_date": "2026-01-15", "qty_sold": 9})],
+    )
+    assert env["ok"] is False
+    assert env["_exit_code"] == 1
+    assert "below zero" in env["error"]
+
+
+def test_cli_write_thesis_overwrite_flag_is_not_persisted(capsys, memory_dir):
+    thesis = {
+        "ticker": "ACME", "horizon_tag": "core", "open_date": "2026-01-15",
+        "entry_price": 100.0, "qty": 5, "conviction": 3, "thesis_one_liner": "x",
+        "reason": "y", "main_risk": "z", "review_trigger": {"type": "price", "value": 80.0},
+        "review_trigger_is_hard_stop": False, "baseline_snapshot": {"price": 100.0},
+    }
+    _run(capsys, ["write-thesis", "--memory-dir", str(memory_dir), "--json", json.dumps(thesis)])
+    updated = dict(thesis, qty=7, overwrite=True)
+    env = _run(
+        capsys,
+        ["write-thesis", "--memory-dir", str(memory_dir), "--json", json.dumps(updated)],
+    )
+    assert env["ok"] is True
+    read = _run(
+        capsys,
+        ["read-thesis", "--memory-dir", str(memory_dir), "--json",
+         json.dumps({"ticker": "ACME", "open_date": "2026-01-15"})],
+    )
+    assert read["data"]["qty"] == 7
+    assert "overwrite" not in read["data"]  # the flag never lands in the record
+
+
 def test_cli_build_own_sent_orders(capsys, memory_dir):
     _run(
         capsys,

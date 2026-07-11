@@ -104,13 +104,24 @@ def _cmd_drawdown_kill(payload: dict[str, Any], args: argparse.Namespace) -> Any
 
 
 def _cmd_write_thesis(payload: dict[str, Any], args: argparse.Namespace) -> Any:
-    path = memory.write_thesis(payload, memory_dir=args.memory_dir, commit=args.commit)
+    # `overwrite` is a write-mode flag, not a thesis field — strip it so it never
+    # gets persisted into the record.
+    thesis = {key: value for key, value in payload.items() if key != "overwrite"}
+    path = memory.write_thesis(
+        thesis,
+        overwrite=bool(payload.get("overwrite", False)),
+        memory_dir=args.memory_dir,
+        commit=args.commit,
+    )
     return {"path": str(path)}
 
 
 def _cmd_read_thesis(payload: dict[str, Any], args: argparse.Namespace) -> Any:
     return memory.read_thesis(
-        payload["ticker"], payload["open_date"], memory_dir=args.memory_dir
+        payload["ticker"],
+        payload["open_date"],
+        horizon_tag=payload.get("horizon_tag"),
+        memory_dir=args.memory_dir,
     )
 
 
@@ -127,6 +138,7 @@ def _cmd_close_thesis(payload: dict[str, Any], args: argparse.Namespace) -> Any:
         realized_pnl=payload["realized_pnl"],
         alpha_vs_spy=payload.get("alpha_vs_spy"),
         lesson=payload.get("lesson"),
+        horizon_tag=payload.get("horizon_tag"),
         memory_dir=args.memory_dir,
         commit=args.commit,
     )
@@ -137,6 +149,18 @@ def _cmd_update_reviewed(payload: dict[str, Any], args: argparse.Namespace) -> A
         payload["ticker"],
         payload["open_date"],
         reviewed_at=payload.get("reviewed_at"),
+        horizon_tag=payload.get("horizon_tag"),
+        memory_dir=args.memory_dir,
+        commit=args.commit,
+    )
+
+
+def _cmd_reduce_thesis_qty(payload: dict[str, Any], args: argparse.Namespace) -> Any:
+    return memory.reduce_thesis_qty(
+        payload["ticker"],
+        payload["open_date"],
+        payload["qty_sold"],
+        horizon_tag=payload.get("horizon_tag"),
         memory_dir=args.memory_dir,
         commit=args.commit,
     )
@@ -286,6 +310,7 @@ COMMANDS = {
     "read-thesis": _cmd_read_thesis,
     "list-theses": _cmd_list_theses,
     "close-thesis": _cmd_close_thesis,
+    "reduce-thesis-qty": _cmd_reduce_thesis_qty,
     "update-reviewed": _cmd_update_reviewed,
     "append-decision": _cmd_append_decision,
     "nav-snapshot": _cmd_nav_snapshot,

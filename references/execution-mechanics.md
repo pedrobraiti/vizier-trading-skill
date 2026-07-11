@@ -39,11 +39,11 @@ crypto `account_type` as a self-report, and never let it alone authorize a live 
 
 ---
 
-## IBKR server (`ibkr`) — 19 tools
+## IBKR server (`ibkr`) — 20 tools
 
 `session_status, market_status, get_quote, get_quotes, account_summary, positions, portfolio,
 preview_order, buy, sell, close_position, stop_order, trailing_stop, bracket_order, order_status,
-wait_for_fill, cancel_order, open_orders, trade_history`
+wait_for_fill, cancel_order, open_orders, trade_history, reconcile_pending`
 
 **Order flow (mandatory):**
 1. `preview_order(symbol, side, ...)` — IBKR `whatif`: estimates commission, margin impact, warnings,
@@ -70,12 +70,13 @@ even if this skill is offline.
 
 ---
 
-## Crypto server (`crypto`) — 14 tools (the 5 IBKR-only tools are ABSENT)
+## Crypto server (`crypto`) — 16 tools (the 4 IBKR-only tools are ABSENT)
 
 `session_status, market_status, get_quote, get_quotes, account_summary, portfolio, positions, buy,
-sell, close_position, cancel_order, open_orders, order_status, trade_history`
+sell, close_position, stop_order, cancel_order, open_orders, order_status, trade_history,
+reconcile_pending`
 
-**Absent:** `preview_order`, `stop_order`, `trailing_stop`, `bracket_order`, `wait_for_fill`.
+**Absent:** `preview_order`, `trailing_stop`, `bracket_order`, `wait_for_fill`.
 Consequences you MUST respect:
 
 - **No preview.** Estimate cost with `get_quote`/`get_quotes`. You **cannot** pre-validate the exchange
@@ -92,8 +93,11 @@ Consequences you MUST respect:
   "current_qty": <balance>, "step": <market precision>}`. It rounds **down** (never oversells), caps at
   the held balance, and — pass `"ticker"` + `"tag"` — cross-checks `tranche-sell` so a tactical trim
   can't eat the core. Take the `%` against the **live `positions` balance**, not the (possibly stale)
-  thesis `qty`. `close_position(symbol)` sells the **whole** base balance and has a **~30s** cooldown
-  (not 45).
+  thesis `qty`. **After the trim fills, run `python -m vizier reduce-thesis-qty --json '{"ticker": "...",
+  "open_date": "...", "qty_sold": <filled qty>}'`** (add `"horizon_tag"` when the ticker has several
+  same-day lots) — the tranche guard approves future sells against the summed thesis `qty`, so an
+  undecremented thesis is a phantom balance it will happily approve against. `close_position(symbol)`
+  sells the **whole** base balance and has a **~30s** cooldown (not 45).
 - **No `wait_for_fill`** → confirm fills by **polling `order_status`** until filled/timeout. Never
   re-call `close_position` to "check" (hits the cooldown guard).
 - **Protective stop: prefer the EXCHANGE-NATIVE `stop_order` (Valet ≥0.6.0), soft stop as fallback.**
@@ -124,6 +128,12 @@ Consequences you MUST respect:
   rest, **record the thesis against the quantity ACTUALLY filled** (not the target — the
   `baseline_snapshot` and sizing reflect reality), and re-try only if price/conviction still justify.
   Never leave a working order dangling between sessions unjournaled (it becomes a phantom position).
+- **After ANY executed partial sell (a trim, either venue): decrement the thesis.** Run
+  `python -m vizier reduce-thesis-qty --json '{"ticker": "...", "open_date": "...", "qty_sold":
+  <filled qty>}'` (plus `"horizon_tag"` to pick the lot when the ticker has several on one day) right
+  after the fill confirms, and before the session ends. If the remaining qty hits 0, it tells you to
+  run `close-thesis` (which records `exit_price`/`realized_pnl`) — it never closes on its own. Skipping
+  this leaves the tranche guard approving sells against a quantity you no longer hold.
 
 ## Building the `reconcile` input (avoid the double-buy guard's failure mode)
 
