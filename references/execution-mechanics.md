@@ -8,6 +8,19 @@ Read this before sending any order. The two Valet servers mirror tool **names** 
 **capabilities**. Get the venue's quirks right or you mis-size, double-buy, or leave a position
 unprotected.
 
+## Units — the one thing you must never get implicit
+
+| Field | Unit |
+|---|---|
+| `quantity`, `qty`, `position_qty`, `filled_quantity`, thesis `qty`, `qty_sold` | **shares / crypto base units** |
+| `cash_amount`, `cash_qty`, `filled_cash`, `value` | **USD** |
+
+**Every exit — protective stop, sell, trim, close — is sized in SHARES, and its ceiling is the quantity
+`positions` says you actually hold.** Never size one from an order's fill number: on IBKR a
+**cash-quantity (US$) order reports its fill in DOLLARS** (see the IBKR flow, step 3), and a real $2 AAPL
+buy would otherwise have produced a 2-share stop against 0.0063 shares held — a naked short. Route every
+exit quantity through **`python -m vizier exit-qty`**, which cannot return more than the position.
+
 The Valet returns `{"ok", "data"}` like Scout. **`account_type` (`"LIVE"`/`"PAPER"`) is the assertion
 field — it is present and identically named on BOTH venues.** It comes from IBKR's real `isPaper` on the
 `ibkr` server and from `CRYPTO_TRADING_MODE` on the `crypto` server — **not** the config label; trust the
@@ -54,12 +67,28 @@ wait_for_fill, cancel_order, open_orders, trade_history, reconcile_pending`
    `close_position(symbol)` closes 100% by resolving the exact fractional quantity.
 3. After a fill, confirm with `order_status(order_id)` (→ `filled_quantity`, avg price) or
    `wait_for_fill(order_id, timeout_seconds)`.
-4. **Protective stop is placed AFTER the fill**, sized by the filled quantity:
-   `stop_order(symbol, side, quantity, stop_price, limit_price?)` or, for entry+exits as one,
-   `bracket_order(symbol, quantity, take_profit, stop_loss, ...)` (OCO). A US$ market buy only reveals
-   its share count after filling, so a `bracket_order` can't be the entry for a dollar buy — buy first,
-   read `filled_quantity`, then attach the stop. (`trailing_stop(symbol, side, quantity,
-   trail_amount|trail_percent)` for a trailing exit.)
+   > ⚠ **`filled_quantity` on a CASH-QUANTITY (US$) order is NOT a share count you can act on.** IBKR
+   > reports that order's cumulative fill **in DOLLARS**: a real live `buy(AAPL, cash_amount=2)` returned
+   > `filled_quantity = 2.0` for a position of **0.0063 shares** @ $317.25 (2026-07-13). Valet now
+   > normalizes this (`filled_quantity` = shares, `filled_cash` = USD, `is_cash_quantity` = flag), but a
+   > **partial** fill of a cash order may still yield no exact share count — Valet returns `None` or marks
+   > it an estimate. **Treat it as a cross-check, never as a size.** *(Crypto/CCXT is fine: it reports
+   > `filled` in base units already — this is an IBKR-specific hazard.)*
+4. **Protective stop is placed AFTER the fill, sized from the POSITION — never from the fill quantity.**
+   Read the exact held quantity from **`positions`** (the authority — it returned exactly `0.0063` for the
+   fill above), then run **`python -m vizier exit-qty`** with `{"position_qty": <positions>,
+   "filled_quantity": <order_status, cross-check>, "filled_cash": …, "is_cash_quantity": …}`. It caps at
+   the holding by construction, rounds DOWN to the lot, refuses when no position is resolved, and flags a
+   fill that exceeds the position. Send its `qty` to
+   `stop_order(symbol, side, quantity, stop_price, limit_price?)` (or `trailing_stop(symbol, side,
+   quantity, trail_amount|trail_percent)`). **An exit larger than the holding is a naked short** —
+   a 2-share SELL STOP against 0.0063 shares held is not "an oversized stop", it is a short position.
+   If `positions` hasn't caught up yet (30-45s lag), **wait and re-read; never fall back to the fill
+   quantity.** For a **full** exit prefer `close_position(symbol)` — it resolves the exact fractional
+   quantity itself, no float round-trip.
+   `bracket_order(symbol, quantity, take_profit, stop_loss, ...)` (OCO) is entry+exits as one, but it is
+   sized in SHARES — so it **cannot be the entry for a dollar buy** (the share count only exists after the
+   fill). Dollar buy → buy, resolve the position, then attach the stop.
 5. `close_position` has a ~45s cooldown + in-flight sentinel. Just after a buy it may report the
    position as not-yet-visible; just after a close, a re-close is refused for ~45s. **Confirm fills via
    `order_status`/`wait_for_fill`, never by re-calling `close_position`** (a naïve retry loop hits the
@@ -90,14 +119,21 @@ Consequences you MUST respect:
   needs `quantity`. **Sell by `quantity` only.** A `%`/`$` trim → quantity goes through
   **`python -m vizier trim-qty`** (don't do the division by hand — Rule #2): `{"current_qty": <live base
   balance from `positions`>, "pct": 30}` or `{"current_price": <get_quote>, "dollar_amount": 50,
-  "current_qty": <balance>, "step": <market precision>}`. It rounds **down** (never oversells), caps at
-  the held balance, and — pass `"ticker"` + `"tag"` — cross-checks `tranche-sell` so a tactical trim
-  can't eat the core. Take the `%` against the **live `positions` balance**, not the (possibly stale)
-  thesis `qty`. **After the trim fills, run `python -m vizier reduce-thesis-qty --json '{"ticker": "...",
-  "open_date": "...", "qty_sold": <filled qty>}'`** (add `"horizon_tag"` when the ticker has several
-  same-day lots) — the tranche guard approves future sells against the summed thesis `qty`, so an
-  undecremented thesis is a phantom balance it will happily approve against. `close_position(symbol)`
-  sells the **whole** base balance and has a **~30s** cooldown (not 45).
+  "current_qty": <balance>, "step": <market precision>}`. **`current_qty` is REQUIRED in both modes**
+  (the tool refuses without it): it is the ceiling that makes an oversell impossible. It rounds **down**
+  (never oversells), caps at the held balance, and — pass `"ticker"` + `"tag"` — cross-checks
+  `tranche-sell` so a tactical trim can't eat the core. Take the `%` against the **live `positions`
+  balance**, not the (possibly stale) thesis `qty`. **After the trim fills, run `python -m vizier
+  reduce-thesis-qty --json '{"ticker": "...", "open_date": "...", "qty_sold": <filled BASE qty>}'`**
+  (add `"horizon_tag"` when the ticker has several same-day lots) — the tranche guard approves future
+  sells against the summed thesis `qty`, so an undecremented thesis is a phantom balance it will happily
+  approve against. `close_position(symbol)` sells the **whole** base balance and has a **~30s** cooldown
+  (not 45).
+- **Fill units here are already correct — do not "fix" them.** CCXT reports an order's `filled` in
+  **base units** (BTC, ETH…), including for a `cash_amount` buy. The dollars-as-shares hazard in step 3
+  of the IBKR flow above is **IBKR-specific**. The discipline is the same on both venues anyway: **size
+  every exit from `positions` via `exit-qty`, never from a fill number** — one rule, no venue special-case
+  to forget.
 - **No `wait_for_fill`** → confirm fills by **polling `order_status`** until filled/timeout. Never
   re-call `close_position` to "check" (hits the cooldown guard).
 - **Protective stop: prefer the EXCHANGE-NATIVE `stop_order` (Valet ≥0.6.0), soft stop as fallback.**
@@ -105,7 +141,9 @@ Consequences you MUST respect:
   the exchange** — it fires even when no agent is running, which is exactly what an unattended position
   needs. Mechanics to respect: most spot APIs (binance included) only offer **stop-LIMIT**, so pass
   `limit_price` (for a SELL stop, at or slightly below `stop_price`) and **disclose the gap risk** ("a
-  violent gap can jump the limit and leave the stop unfilled"). Sized by base `quantity` only. The tool
+  violent gap can jump the limit and leave the stop unfilled"). **Sized by base `quantity` only — get it
+  from `exit-qty` against the live `positions` balance**, same rule as IBKR (a stop bigger than the
+  balance can't even rest on a spot exchange; it just fails, or sells the wrong size). The tool
   **refuses cleanly** where the exchange has no native stops — ONLY then fall back to the **SOFT
   skill-monitored stop**, with the old disclosure verbatim: *"protection is skill-managed (monitoring),
   not a resting stop order on the exchange"*, honest about WHEN it fires (in default confirmation mode
@@ -130,7 +168,8 @@ Consequences you MUST respect:
   Never leave a working order dangling between sessions unjournaled (it becomes a phantom position).
 - **After ANY executed partial sell (a trim, either venue): decrement the thesis.** Run
   `python -m vizier reduce-thesis-qty --json '{"ticker": "...", "open_date": "...", "qty_sold":
-  <filled qty>}'` (plus `"horizon_tag"` to pick the lot when the ticker has several on one day) right
+  <filled qty, in SHARES/base units — never dollars>}'` (plus `"horizon_tag"` to pick the lot when the
+  ticker has several on one day) right
   after the fill confirms, and before the session ends. If the remaining qty hits 0, it tells you to
   run `close-thesis` (which records `exit_price`/`realized_pnl`) — it never closes on its own. Skipping
   this leaves the tranche guard approving sells against a quantity you no longer hold.

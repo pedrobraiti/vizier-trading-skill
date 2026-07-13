@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from vizier import cli
 
 
@@ -170,6 +172,43 @@ def test_cli_trim_qty_with_tranche_check(capsys, memory_dir):
     assert env["ok"] is True
     assert env["data"]["qty"] == 1.5  # 30% of 5
     assert env["data"]["tranche_check"]["allowed"] is True  # 1.5 <= 5 tactical
+
+
+def test_cli_exit_qty_sizes_a_stop_from_the_position_not_the_dollar_fill(capsys, memory_dir):
+    """END-TO-END regression for the live bug: the skill asks the core for the stop
+    quantity of a $2 AAPL buy whose IBKR filled_quantity came back as 2.0 (dollars).
+    The core must answer 0.0063 — the position — never 2."""
+    env = _run(
+        capsys,
+        [
+            "exit-qty", "--memory-dir", str(memory_dir), "--json",
+            json.dumps(
+                {
+                    "position_qty": 0.0063,   # from `positions` — the truth
+                    "filled_quantity": 2.0,   # IBKR's dollars-as-shares report
+                    "filled_cash": 2.0,
+                    "is_cash_quantity": True,
+                }
+            ),
+        ],
+    )
+    assert env["ok"] is True
+    assert env["data"]["qty"] == pytest.approx(0.0063)
+    assert env["data"]["filled_quantity_exceeds_position"] is True
+    assert env["data"]["recommended_tool"] == "close_position"
+
+
+def test_cli_exit_qty_refuses_without_a_resolved_position(capsys, memory_dir):
+    """No position resolved -> the envelope must carry the refusal, not a number."""
+    env = _run(
+        capsys,
+        [
+            "exit-qty", "--memory-dir", str(memory_dir), "--json",
+            json.dumps({"filled_quantity": 2.0}),
+        ],
+    )
+    assert env["ok"] is False
+    assert "position_qty" in env["error"]
 
 
 def test_cli_reduce_thesis_qty_roundtrip(capsys, memory_dir):

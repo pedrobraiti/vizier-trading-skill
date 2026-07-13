@@ -325,7 +325,7 @@ def test_trim_quantity_pct_mode():
 
 
 def test_trim_quantity_dollar_mode():
-    result = risk.trim_quantity(current_price=2_500.0, dollar_amount=50.0)
+    result = risk.trim_quantity(current_qty=1.0, current_price=2_500.0, dollar_amount=50.0)
     assert result["qty"] == pytest.approx(0.02)  # 50 / 2500
     assert result["mode"] == "dollar"
 
@@ -366,11 +366,126 @@ def test_trim_quantity_validates_inputs():
     with pytest.raises(ValueError, match="current_qty"):
         risk.trim_quantity(pct=30)  # pct without current_qty
     with pytest.raises(ValueError, match="current_price"):
-        risk.trim_quantity(dollar_amount=50)  # dollar without price
+        risk.trim_quantity(current_qty=1, dollar_amount=50)  # dollar without price
     with pytest.raises(ValueError, match="pct OR dollar_amount"):
         risk.trim_quantity(current_qty=2, pct=30, dollar_amount=50)
     with pytest.raises(ValueError, match="pct must be"):
         risk.trim_quantity(current_qty=2, pct=150)
+
+
+def test_trim_quantity_dollar_mode_requires_the_holding():
+    """A $ trim with no holding to cap against could size an exit larger than the
+    position (the naked-short failure mode). The holding is the ceiling that makes
+    an oversell impossible, so it is mandatory — not merely recommended."""
+    with pytest.raises(ValueError, match="current_qty"):
+        risk.trim_quantity(current_price=100.0, dollar_amount=500.0)
+
+
+# ── Exit sizing: an exit can NEVER exceed the held quantity ──────────────────
+# The live bug (2026-07-13): `buy(AAPL, cash_amount=2)` filled 0.0063 shares @
+# $317.25, and IBKR reported the cash-quantity order's fill as filled_quantity=2.0
+# (DOLLARS). A stop sized from that number would have been a ~317x oversell — a
+# naked short. `positions` returned the truth: 0.0063.
+
+
+def test_exit_quantity_ignores_a_dollar_denominated_fill_and_uses_the_position():
+    """THE regression test for the live bug: a $2 cash buy of AAPL whose
+    filled_quantity comes back as 2.0 must NOT produce a 2-share stop."""
+    result = risk.exit_quantity(
+        position_qty=0.0063,          # the truth, from `positions`
+        filled_quantity=2.0,          # IBKR's dollars-as-shares report
+        filled_cash=2.0,
+        is_cash_quantity=True,
+    )
+    assert result["qty"] == pytest.approx(0.0063)
+    assert result["qty"] <= 0.0063 + 1e-9  # the stop can never exceed the holding
+    assert result["filled_quantity_exceeds_position"] is True
+    assert result["filled_quantity_trusted"] is False
+    assert result["intent_source"] == "position_qty"
+    assert result["full_exit"] is True
+    assert result["recommended_tool"] == "close_position"
+    assert any("DOLLARS" in w for w in result["warnings"])
+
+
+def test_exit_quantity_caps_any_requested_size_at_the_holding():
+    """No input combination may return more than is held — the hard ceiling."""
+    result = risk.exit_quantity(position_qty=0.0063, requested_qty=2.0)
+    assert result["qty"] == pytest.approx(0.0063)
+    assert result["capped_to_position"] is True
+
+
+def test_exit_quantity_refuses_without_a_resolved_position():
+    """A stop with no resolved position is a naked short. Refuse, never guess."""
+    with pytest.raises(ValueError, match="position_qty"):
+        risk.exit_quantity(position_qty=None, filled_quantity=2.0)
+    with pytest.raises(ValueError, match="naked short"):
+        risk.exit_quantity(position_qty=0.0)
+
+
+def test_exit_quantity_trusts_a_share_fill_below_the_position():
+    """A fresh lot's stop covers THAT lot, not a pre-existing core lot: a trustworthy
+    share-denominated fill under the total holding is honored as the intent."""
+    result = risk.exit_quantity(position_qty=10.5, filled_quantity=0.5)
+    assert result["qty"] == pytest.approx(0.5)
+    assert result["intent_source"] == "filled_quantity"
+    assert result["filled_quantity_trusted"] is True
+    assert result["full_exit"] is False
+    assert result["warnings"] == []
+
+
+def test_exit_quantity_never_trusts_an_estimated_fill():
+    """A partial fill of a cash order yields no exact share count; Valet flags it as
+    an estimate. The exit falls back to the authoritative position."""
+    result = risk.exit_quantity(
+        position_qty=0.0031,
+        filled_quantity=0.0063,
+        filled_quantity_is_estimate=True,
+        is_cash_quantity=True,
+    )
+    assert result["qty"] == pytest.approx(0.0031)
+    assert result["intent_source"] == "position_qty"
+    assert any("ESTIMATE" in w for w in result["warnings"])
+
+
+def test_exit_quantity_rounds_down_to_the_lot_and_flags_a_sub_lot_stop():
+    assert risk.exit_quantity(position_qty=1.37, step=0.1)["qty"] == pytest.approx(1.3)
+    sub_lot = risk.exit_quantity(position_qty=0.0063, step=1.0)  # whole-share venue
+    assert sub_lot["qty"] == 0.0
+    assert sub_lot["below_min_lot"] is True
+    assert any("does NOT exist" in w for w in sub_lot["warnings"])
+
+
+def test_exit_quantity_crypto_base_units_are_already_correct():
+    """Crypto/CCXT reports `filled` in base units — it was never broken. A trustworthy
+    base-unit fill is used as-is (no dollar confusion to defend against)."""
+    result = risk.exit_quantity(position_qty=0.05, filled_quantity=0.05, step=0.0001)
+    assert result["qty"] == pytest.approx(0.05)
+    assert result["filled_quantity_trusted"] is True
+    assert result["warnings"] == []
+
+
+# ── Fill-unit cross-check: shares or dollars? ────────────────────────────────
+
+
+def test_check_fill_units_catches_dollars_recorded_as_shares():
+    units = risk.check_fill_units(qty=2.0, cash_qty=2.0, entry_price=317.25)
+    assert units["unit_error"] is True
+    assert units["implied_qty"] == pytest.approx(2.0 / 317.25)
+    assert "DOLLARS recorded as SHARES" in units["reason"]
+
+
+def test_check_fill_units_accepts_a_correct_share_count():
+    units = risk.check_fill_units(qty=0.0063, cash_qty=2.0, entry_price=317.25)
+    assert units["unit_error"] is False
+    assert units["consistent"] is True
+
+
+def test_check_fill_units_is_silent_without_a_cash_amount_to_compare():
+    """A share-sized order has no cash_qty — no cross-check is possible, and none
+    is claimed (a fabricated verdict would be worse than none)."""
+    units = risk.check_fill_units(qty=7.0, cash_qty=None, entry_price=142.30)
+    assert units["checked"] is False
+    assert units["unit_error"] is False
 
 
 # ── Position limits — each violation type ────────────────────────────────────

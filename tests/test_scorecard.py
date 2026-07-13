@@ -140,6 +140,24 @@ def test_thesis_without_qty_is_skipped():
     assert "entry_price or qty" in result["skipped"][0]["reason"]
 
 
+def test_thesis_with_a_dollar_qty_is_skipped_not_scored():
+    """A legacy/hand-edited record holding DOLLARS in `qty` (IBKR reports a
+    cash-quantity order's fill in dollars) would produce a P&L off by the share
+    price. Name it in `skipped` — a fabricated number is worse than none."""
+    bad = _thesis(ticker="AAPL", entry_price=317.25, qty=2.0, cash_qty=2.0)
+    result = compute_scorecard([bad], prices={"AAPL": 320.0}, as_of="2026-06-01")
+    assert result["theses"] == []
+    assert "DOLLARS recorded as SHARES" in result["skipped"][0]["reason"]
+
+
+def test_thesis_with_a_correct_fractional_qty_is_scored():
+    """The correctly-recorded version of that same US$ buy scores normally."""
+    good = _thesis(ticker="AAPL", entry_price=317.25, qty=0.0063, cash_qty=2.0)
+    result = compute_scorecard([good], prices={"AAPL": 337.25}, as_of="2026-06-01")
+    assert result["skipped"] == []
+    assert result["theses"][0]["pnl"] == pytest.approx(0.0063 * 20.0)
+
+
 def test_activity_summary_from_decision_log():
     log = [
         {"intent": "research"},

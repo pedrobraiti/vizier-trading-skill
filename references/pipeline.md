@@ -343,8 +343,18 @@ tight. Its findings appear to the user with the recommendation.
 Hand to `references/execution-mechanics.md` for the venue order flow and `references/autonomy-and-safety.md`
 for the arming/gate discipline. Journal **per leg, before sending the next one** (SKILL.md rule, any
 multi-leg batch, confirmation mode included): after each fill confirms, `append-decision` the fill and
-`write-thesis` (with `baseline_snapshot` + the filled `qty`) for THAT leg. At the end of the round,
-record a `nav-snapshot` and produce the output (`references/output-template.md`).
+`write-thesis` (with `baseline_snapshot` + the filled `qty` **in shares/base units**, USD in `cash_qty`)
+for THAT leg. At the end of the round, record a `nav-snapshot` and produce the output
+(`references/output-template.md`).
+
+**The protective stop is sized from `positions`, never from the fill quantity.** After the buy confirms,
+read the exact held quantity with `positions` and run **`python -m vizier exit-qty`** — it caps the exit
+at the holding by construction and refuses when no position is resolved. On IBKR a **cash-quantity (US$)
+order reports its fill in DOLLARS** (`buy(AAPL, cash_amount=2)` → `filled_quantity = 2.0` for a
+**0.0063-share** position), so a stop sized off `filled_quantity` would be a ~317x oversell — a **naked
+short**. Same reason the thesis `qty` is written in **SHARES** (the USD goes in `cash_qty`): the tranche
+guard, the P&L and the scorecard all sum that field. Crypto/CCXT reports base units correctly; the
+dollars-as-shares hazard is IBKR-specific, the `positions`-first discipline is universal.
 
 ---
 

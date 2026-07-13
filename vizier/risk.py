@@ -18,7 +18,14 @@ from typing import Any
 
 import yaml
 
-from .constants import LIMIT_EPSILON, MAX_CONVICTION, PERCENT
+from .constants import (
+    LIMIT_EPSILON,
+    MAX_CONVICTION,
+    PERCENT,
+    QTY_CASH_CONSISTENCY_TOLERANCE,
+    QTY_CASH_UNIT_PRICE_RATIO,
+    QTY_EPSILON,
+)
 
 # ── Profile model ────────────────────────────────────────────────────────────
 # A frozen, typed view over `config/risk_profile.yaml`. The YAML stays the
@@ -333,6 +340,14 @@ def allocate_across_candidates(
 
 
 # ── Sell-side sizing: %/$ -> base quantity ───────────────────────────────────
+#
+# UNITS, once and for all (the whole class of bug here is an implicit unit):
+#   * ``qty`` / ``quantity`` / ``current_qty`` / ``position_qty`` = SHARES or crypto
+#     BASE UNITS. This is the ONLY unit any exit (sell, stop, trim, close) is sized in.
+#   * ``cash_amount`` / ``dollar_amount`` / ``cash_qty`` / ``filled_cash`` = USD.
+# An exit sized off a dollar figure is a naked short waiting to happen: a real
+# IBKR fill of `buy(AAPL, cash_amount=2)` acquired 0.0063 shares, and a SELL stop
+# for "2" against it would have been a ~317x oversell.
 
 
 def trim_quantity(
@@ -348,18 +363,32 @@ def trim_quantity(
     Sells are by quantity (both venues), so "trim 30% of ETH" / "sell $50 of SOL"
     is a money-adjacent conversion the LLM should not do by hand (spec, Rule #2).
     Two modes:
-      * **pct**    — ``current_qty * pct/100`` (needs ``current_qty``).
-      * **dollar** — ``dollar_amount / current_price`` (needs ``current_price``).
-    The result is capped at ``current_qty`` when known (never oversell) and floored
-    to ``step`` (the market lot size / amount precision) when given — always DOWN,
-    so a rounding error can only sell slightly less, never more than intended.
+      * **pct**    — ``current_qty * pct/100``.
+      * **dollar** — ``dollar_amount / current_price`` (USD in, SHARES out).
+
+    ``current_qty`` — the live held quantity in SHARES/base units, read from the
+    venue's ``positions`` tool — is **required in both modes**: it is the hard
+    ceiling that makes an oversell impossible. A dollar trim with no holding to
+    cap against could size an exit larger than the position (the naked-short
+    failure mode), so it is refused rather than computed.
+
+    The result is capped at ``current_qty`` (never oversell) and floored to ``step``
+    (the market lot size / amount precision) when given — always DOWN, so a rounding
+    error can only sell slightly less, never more than intended.
     """
     if pct is not None and dollar_amount is not None:
         raise ValueError("pass pct OR dollar_amount, not both")
+    if current_qty is None:
+        raise ValueError(
+            "trim needs current_qty - the live held quantity in SHARES/base units "
+            "(from the venue's `positions` tool). It is the ceiling that makes an "
+            "oversell impossible; without it a trim could size an exit larger than "
+            "the position"
+        )
+    if not math.isfinite(float(current_qty)) or float(current_qty) < 0:
+        raise ValueError("current_qty must be a non-negative, finite quantity (shares/base units)")
 
     if pct is not None:
-        if current_qty is None:
-            raise ValueError("pct trim needs current_qty")
         if not 0 < pct <= PERCENT:
             raise ValueError("pct must be in (0, 100]")
         raw = current_qty * pct / PERCENT
@@ -372,10 +401,10 @@ def trim_quantity(
         raw = dollar_amount / current_price
         mode = "dollar"
     else:
-        raise ValueError("provide pct (with current_qty) or dollar_amount (with current_price)")
+        raise ValueError("provide pct or dollar_amount (with current_price), plus current_qty")
 
     capped_to_holding = False
-    if current_qty is not None and raw > current_qty:
+    if raw > current_qty:
         raw = current_qty
         capped_to_holding = True
 
@@ -403,6 +432,226 @@ def trim_quantity(
         "rounded_down": qty < raw - LIMIT_EPSILON,
         "capped_to_holding": capped_to_holding,
         "below_min_lot": below_min_lot,
+    }
+
+
+# ── Fill-unit cross-check: is this number SHARES or DOLLARS? ─────────────────
+
+
+def check_fill_units(
+    *,
+    qty: float | None,
+    cash_qty: float | None,
+    entry_price: float | None,
+) -> dict[str, Any]:
+    """Is ``qty`` really a SHARE count, or a dollar amount wearing a share's name?
+
+    The signature of the bug (found live, 2026-07-13): a US$ "cash quantity" buy
+    of $2 of AAPL filled 0.0063 shares @ $317.25, and IBKR reported the cumulative
+    fill of that order as ``filled_quantity = 2.0`` — the DOLLARS, not the shares.
+    Written into a thesis as ``qty``, that number corrupts the tranche guard, the
+    P&L and the scorecard, and sizes a 2-share stop against a 0.0063-share holding.
+
+    The check: with ``cash_qty`` (USD deployed) and ``entry_price`` (USD/share)
+    both known, the shares those dollars *could* have bought is
+    ``cash_qty / entry_price``. A ``qty`` that instead equals ``cash_qty`` while
+    the price sits far from $1 is dollars-as-shares — conclusive, not a heuristic.
+
+    Returns ``consistent`` (qty agrees with the implied share count within the
+    tolerance), ``unit_error`` (the conclusive dollars-as-shares signature) and
+    the numbers behind the verdict. Silent when there is nothing to compare
+    against (``cash_qty`` is None for a share-sized order — then no cross-check
+    is possible and none is claimed).
+    """
+    if qty is None or cash_qty is None or entry_price is None:
+        return {"checked": False, "consistent": None, "unit_error": False, "reason": None}
+
+    qty_value = float(qty)
+    cash_value = float(cash_qty)
+    price = float(entry_price)
+    if price <= 0 or cash_value <= 0 or qty_value <= 0:
+        return {"checked": False, "consistent": None, "unit_error": False, "reason": None}
+
+    implied_qty = cash_value / price
+    ratio = qty_value / implied_qty
+    consistent = abs(ratio - 1.0) <= QTY_CASH_CONSISTENCY_TOLERANCE
+
+    # Dollars-as-shares: qty *is* the cash figure, and the price is far enough
+    # from $1 that the two units cannot legitimately coincide.
+    looks_like_cash = (
+        math.isclose(qty_value, cash_value, rel_tol=1e-6)
+        and (price > QTY_CASH_UNIT_PRICE_RATIO or price < 1.0 / QTY_CASH_UNIT_PRICE_RATIO)
+    )
+
+    reason = None
+    if looks_like_cash:
+        reason = (
+            f"qty {qty_value:g} equals the cash amount {cash_value:g} while the price is "
+            f"{price:g}/share - this is DOLLARS recorded as SHARES (IBKR reports a "
+            f"cash-quantity order's filled_quantity in dollars). The real quantity is "
+            f"~{implied_qty:g} shares; read it from the venue's `positions` tool"
+        )
+    elif not consistent:
+        reason = (
+            f"qty {qty_value:g} does not match cash_qty/entry_price = {implied_qty:g} "
+            f"({ratio:.3g}x) - reconcile the fill against `positions` before journaling"
+        )
+
+    return {
+        "checked": True,
+        "consistent": consistent,
+        "unit_error": looks_like_cash,
+        "implied_qty": implied_qty,
+        "ratio": ratio,
+        "reason": reason,
+    }
+
+
+# ── Exit sizing: an exit can NEVER exceed what is actually held ──────────────
+
+
+def exit_quantity(
+    *,
+    position_qty: float | None,
+    requested_qty: float | None = None,
+    filled_quantity: float | None = None,
+    filled_quantity_is_estimate: bool = False,
+    filled_cash: float | None = None,
+    is_cash_quantity: bool = False,
+    step: float | None = None,
+) -> dict[str, Any]:
+    """Size any exit (protective stop, trim, sell) so it CANNOT exceed the holding.
+
+    This is the seam that makes the oversize-exit bug unrepresentable rather than
+    merely discouraged. The authoritative quantity you hold is ``position_qty`` —
+    the exact base/share figure from the venue's ``positions`` tool (it returned
+    ``0.0063`` for the live $2 AAPL fill whose ``filled_quantity`` said ``2.0``).
+    Everything else is an input to be cross-checked *against* it, never a source
+    of truth to size from:
+
+    * ``position_qty`` is **required and is a hard ceiling.** No argument, flag or
+      combination of inputs can make the returned ``qty`` exceed it. Absent or
+      non-positive → the call is REFUSED (raises): a stop placed with no resolved
+      position is a naked short.
+    * ``requested_qty`` — the quantity this exit is *meant* to cover (typically the
+      lot that just filled, so a fresh tactical stop does not also stop out a
+      pre-existing core lot). Defaults to the fill, then to the whole position.
+    * ``filled_quantity`` — from ``order_status``. Used only as an intent hint and a
+      cross-check. On IBKR a **cash-quantity order historically reported it in
+      DOLLARS**, and even corrected it may be an estimate on a partial cash fill —
+      so it is never trusted as a ceiling. A ``filled_quantity`` above the held
+      position is reported (``filled_quantity_exceeds_position``) and ignored.
+    * ``step`` — lot size / amount precision. Rounds **DOWN**, so rounding can only
+      ever exit less than intended, never more.
+
+    ``full_exit`` tells the caller the exit covers the whole position — prefer the
+    venue's ``close_position`` there, which resolves the exact fractional quantity
+    itself instead of round-tripping a float.
+    """
+    if position_qty is None:
+        raise ValueError(
+            "exit sizing needs position_qty - the EXACT held quantity in shares/base "
+            "units from the venue's `positions` tool. An exit sized from an order fill "
+            "alone can exceed the position: IBKR reports a cash-quantity order's "
+            "filled_quantity in DOLLARS (a $2 AAPL buy reported 2.0 against a holding "
+            "of 0.0063 shares)"
+        )
+    held = float(position_qty)
+    if not math.isfinite(held):
+        raise ValueError("position_qty must be a finite quantity (shares/base units)")
+    if held <= 0:
+        raise ValueError(
+            f"no position to exit (position_qty={held:g}) - refusing to size an exit. "
+            "Selling/stopping what you do not hold is a naked short; resolve the "
+            "position with `positions` first (it may simply lag the fill by 30-45s)"
+        )
+
+    warnings: list[str] = []
+
+    fill_exceeds_position = (
+        filled_quantity is not None
+        and math.isfinite(float(filled_quantity))
+        and float(filled_quantity) > held + QTY_EPSILON
+    )
+    if fill_exceeds_position:
+        cash_hint = (
+            " This is the signature of a cash-quantity (US$) order whose fill is "
+            "reported in DOLLARS."
+            if is_cash_quantity or filled_cash is not None
+            else ""
+        )
+        warnings.append(
+            f"filled_quantity ({float(filled_quantity):g}) exceeds the held position "
+            f"({held:g}) - it is NOT a share count you can size an exit from.{cash_hint} "
+            "Sized from `positions` instead."
+        )
+    if filled_quantity_is_estimate:
+        warnings.append(
+            "filled_quantity is flagged as an ESTIMATE (a partial fill of a cash-quantity "
+            "order does not yield an exact share count) - used only as a cross-check, "
+            "the exit is sized from `positions`."
+        )
+
+    fill_is_usable = (
+        filled_quantity is not None
+        and math.isfinite(float(filled_quantity))
+        and float(filled_quantity) > 0
+        and not fill_exceeds_position
+        and not filled_quantity_is_estimate
+    )
+
+    if requested_qty is not None:
+        intended = float(requested_qty)
+        if not math.isfinite(intended) or intended <= 0:
+            raise ValueError("requested_qty must be a positive, finite quantity when given")
+        intent_source = "requested_qty"
+    elif fill_is_usable:
+        intended = float(filled_quantity)
+        intent_source = "filled_quantity"
+    else:
+        intended = held
+        intent_source = "position_qty"
+
+    # THE ceiling. Everything above is intent; this line is the guarantee.
+    capped_to_position = intended > held + QTY_EPSILON
+    raw = min(intended, held)
+
+    qty = raw
+    if step is not None:
+        if step <= 0:
+            raise ValueError("step must be positive")
+        # Floor to whole steps (kill float dust first, never round UP past `raw`).
+        units = math.floor(round(raw / step, 9))
+        qty = round(units * step, 12)
+
+    below_min_lot = qty == 0.0 and raw > QTY_EPSILON
+    if below_min_lot:
+        warnings.append(
+            f"the exit rounds to 0 at step {step:g} - it is smaller than one lot, so no "
+            "order can be sent and the intended protection does NOT exist. Surface this."
+        )
+    if capped_to_position:
+        warnings.append(
+            f"requested exit ({intended:g}) exceeded the held position ({held:g}) and was "
+            "capped - an exit is never allowed to be larger than the holding."
+        )
+
+    full_exit = qty >= held - QTY_EPSILON
+
+    return {
+        "qty": qty,
+        "position_qty": held,
+        "intended_qty": intended,
+        "intent_source": intent_source,
+        "capped_to_position": capped_to_position,
+        "rounded_down": qty < raw - QTY_EPSILON,
+        "below_min_lot": below_min_lot,
+        "full_exit": full_exit,
+        "filled_quantity_trusted": fill_is_usable,
+        "filled_quantity_exceeds_position": fill_exceeds_position,
+        "recommended_tool": "close_position" if full_exit else "stop_order/sell",
+        "warnings": warnings,
+        "unit": "shares/base units (NEVER dollars)",
     }
 
 

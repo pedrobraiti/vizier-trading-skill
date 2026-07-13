@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -56,6 +57,7 @@ from typing import Any
 import yaml
 
 from .constants import AUTONOMY_WINDOW_SECONDS
+from .risk import check_fill_units
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -281,13 +283,37 @@ def _validate_thesis(thesis: dict[str, Any]) -> None:
         raise ValueError(
             f"horizon_tag must be one of {HORIZON_TAGS}, got {thesis['horizon_tag']!r}"
         )
-    # qty is the filled share/base quantity. It must be a real number, not null:
+    # `qty` is the filled quantity in SHARES / crypto BASE UNITS — never dollars.
+    # The USD deployed goes in `cash_qty`. It must be a real, positive number:
     # tranche accounting SUMS qty, so a thesis with no qty is silently invisible
     # to the §D core-vs-tactical guard (4/5 sims hit this). Fail loud at write.
     if thesis.get("qty") is None:
         raise ValueError(
-            "thesis 'qty' (filled quantity) is required and must not be null - "
-            "without it the position is invisible to tranche accounting"
+            "thesis 'qty' (filled quantity, in SHARES/base units - NOT dollars) is "
+            "required and must not be null - without it the position is invisible to "
+            "tranche accounting. The USD deployed belongs in 'cash_qty'"
+        )
+    qty = float(thesis["qty"])
+    if not math.isfinite(qty) or qty <= 0:
+        raise ValueError(
+            f"thesis 'qty' must be a positive, finite share/base quantity, got {qty!r}"
+        )
+
+    # The dollars-as-shares guard. A US$ (cash-quantity) buy is the documented entry
+    # path for equities, and IBKR reports THAT order's cumulative fill in DOLLARS —
+    # a real $2 AAPL buy came back as filled_quantity=2.0 against 0.0063 shares held.
+    # Writing that as `qty` corrupts the tranche guard, the P&L and the scorecard from
+    # then on, so the store refuses it at the door rather than trusting the caller.
+    units = check_fill_units(
+        qty=thesis.get("qty"),
+        cash_qty=thesis.get("cash_qty"),
+        entry_price=thesis.get("entry_price"),
+    )
+    if units["unit_error"]:
+        raise ValueError(f"thesis 'qty' is in the wrong UNIT: {units['reason']}")
+    if units["checked"] and not units["consistent"]:
+        raise ValueError(
+            f"thesis 'qty' is inconsistent with cash_qty/entry_price: {units['reason']}"
         )
 
 
@@ -484,12 +510,19 @@ def reduce_thesis_qty(
     phantom balance the guard would happily approve against. Call it with the
     quantity that actually FILLED, right after confirming the trim.
 
+    ``qty_sold`` is in SHARES / crypto BASE UNITS — never dollars. A dollar figure
+    here would silently wipe out a fractional position's whole balance (or blow
+    past it and raise). Convert a %/$ trim with ``trim_quantity`` first.
+
     Never closes the thesis on its own: a qty that reaches exactly 0 returns a
     note pointing to ``close_thesis`` — the exit price and realized P&L belong
     to the close, not to a quantity decrement.
     """
-    if qty_sold <= 0:
-        raise ValueError(f"qty_sold must be positive, got {qty_sold!r}")
+    if not math.isfinite(float(qty_sold)) or qty_sold <= 0:
+        raise ValueError(
+            f"qty_sold must be a positive, finite quantity in shares/base units "
+            f"(not dollars), got {qty_sold!r}"
+        )
     memory_dir = Path(memory_dir)
     path = _locate_thesis(ticker, open_date, memory_dir, horizon_tag=horizon_tag)
     record = yaml.safe_load(path.read_text(encoding="utf-8"))

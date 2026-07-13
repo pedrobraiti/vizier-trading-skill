@@ -8,11 +8,21 @@
 ticker: ACME                 # crypto would be CCXT BASE/QUOTE, e.g. BTC/USDT
 horizon_tag: core            # core (long-term) | tactical (short-term)
 open_date: "2026-01-15"
-entry_price: 142.30
-qty: 7                       # REQUIRED: base/share quantity actually filled (read
-                             # filled_quantity / crypto order_status post-fill).
+entry_price: 142.30          # USD per SHARE / per base unit
+qty: 7                       # REQUIRED, and ALWAYS IN SHARES / CRYPTO BASE UNITS — never dollars.
+                             # Take it from the venue's `positions` tool after the fill (the
+                             # authority), cross-checked against order_status.
+                             # !! IBKR reports a CASH-QUANTITY (US$) order's fill in DOLLARS:
+                             #    buy(AAPL, cash_amount=2) came back filled_quantity=2.0 for a
+                             #    real position of 0.0063 shares @ $317.25. Writing 2.0 here
+                             #    corrupts the tranche guard, the P&L and the scorecard, and
+                             #    would size a 2-share stop against 0.0063 shares (a naked
+                             #    short). Crypto/CCXT reports base units correctly.
                              # tranche accounting sums this -> it must not be null.
-cash_qty: null              # USD deployed when bought by value (cashQty); else null
+                             # write-thesis REFUSES a qty that can't be reconciled with
+                             # cash_qty / entry_price.
+cash_qty: null               # USD deployed when bought by value (cashQty) — the dollar figure's
+                             # ONLY home; else null. For the AAPL example: qty 0.0063, cash_qty 2.0
 conviction: 4                # 1-5 rubric (5 = fully confirmed, datado catalyst, no red flag)
 thesis_one_liner: "Quality compounder re-rating after margin inflection."
 reason: >

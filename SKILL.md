@@ -88,6 +88,7 @@ python -m vizier <command> --json '<payload>'
 | Tranche balances by horizon tag | `tranches` / `tranche-sell` |
 | Reconcile exposure / classify a position | `reconcile` / `provenance` |
 | Build the `reconcile` input from the log / convert a %/$ trim to a sell qty | `build-own-sent-orders` / `trim-qty` |
+| **Size ANY exit — protective stop, sell, trim** | **`exit-qty`** — pass `position_qty` (from `positions`); it can never return more than you hold |
 | **Autonomy** arm + per-run marker + per-candidate gate | `arm-autonomy` / `begin-run` / `autonomy-gate` / `autonomy-state` / `disarm-autonomy` |
 | Journal every decision & fill (append-only) | `append-decision` |
 
@@ -337,6 +338,28 @@ under one denominator. Mechanics differ sharply by venue: `references/execution-
   on the `crypto` exchange — separate account; the protective stop is a stop-LIMIT resting on the
   exchange — include it?") — and the crypto venue must be **okayed** by the user. Never route real money to the crypto exchange on an
   unsolicited leg without that explicit OK, even when the overall $-amount was authorized.
+- **NEVER size an exit from a fill quantity. An exit is sized from the POSITION — and can never exceed
+  it.** (Learned from a real US$2 live fill, 2026-07-13.) A **cash-quantity order** — `buy(symbol,
+  cash_amount=USD)`, which is THE entry path for equities — is sized in **DOLLARS**, and on **IBKR** the
+  order's cumulative fill is reported **in dollars too**: a real `buy(AAPL, cash_amount=2)` came back with
+  `filled_quantity = 2.0` while the position acquired was **0.0063 shares** @ $317.25. Sizing the
+  protective stop off that number = a SELL STOP for 2 shares against 0.0063 held — a ~317x oversell, i.e.
+  a **naked short**, and a thesis `qty` of 2.0 that poisons the tranche guard, the P&L and the scorecard.
+  So, on **every** exit (protective stop, trim, sell):
+  1. Read the **exact held quantity from `positions`** (it returned exactly `0.0063` — it is the
+     authority; a fill quantity never is).
+  2. Run **`python -m vizier exit-qty`** — `{"position_qty": <from positions>, "filled_quantity":
+     <from order_status, cross-check only>, "filled_cash": …, "is_cash_quantity": true|false,
+     "step": <lot size>}`. It caps at the holding **by construction** (no input can make it return more),
+     rounds DOWN, refuses outright when no position is resolved, and flags a fill that exceeds the
+     position. **Never do this arithmetic by hand** (Rule #2).
+  3. **Full exit → use `close_position`**, which resolves the exact fractional quantity itself.
+  If `positions` still shows nothing (the 30-45s lag), **wait and re-read — do not fall back to the fill
+  quantity.** An unprotected position for 30s is recoverable; a naked short is not.
+  **Units, always explicit:** `quantity`/`qty`/`position_qty` = **shares / crypto base units**;
+  `cash_amount`/`cash_qty`/`filled_cash` = **USD**. **Venue difference:** this dollars-as-shares report is
+  **IBKR-specific** — the crypto/CCXT side reports `filled` in **base units** already, which is correct.
+  Sizing every exit from `positions` is right on both venues regardless.
 - **Crypto protective stops: prefer the exchange-NATIVE `stop_order`; soft only as fallback.** The
   crypto Valet (≥0.6.0) has `stop_order` — a resting trigger order ON the exchange that fires with no
   agent running. Use it for any crypto position that needs protection; most spot venues require
@@ -407,18 +430,24 @@ direction from a level is the same fabrication the verify-before-conceding rule 
   machine without the venv), note "thesis-check unavailable (core not resolved)" once and **continue
   the read-only work** — never block the whole report on it. (`list-theses` reads `memory/theses/*.yaml`;
   if needed you can read those files directly as a fallback.)
-- **On a buy, write the thesis WITH the quantitative `baseline_snapshot` AND the filled `qty`**
+- **On a buy, write the thesis WITH the quantitative `baseline_snapshot` AND the filled `qty` in SHARES**
   (`write-thesis`) — price, multiples, RSI/SMA, VIX/rates, analyst consensus, ownership, catalyst date —
   because Scout's `as_of` cannot reconstruct soft signals; the thesis-check diffs against this baseline.
-  After the fill, read the filled quantity from `order_status` (IBKR exposes it as `filled_quantity`;
-  crypto via the same poll) and write it as `qty` (and
-  `cash_qty` for a dollar buy): **the tranche guard sums `qty`, so a thesis without it is invisible to
-  tranche accounting.** Record a daily `nav-snapshot`. Two lots of the same ticker on the same day
+  **`qty` is ALWAYS the share / crypto-base quantity, NEVER dollars** — take it from the same
+  `positions` read that sized the stop (cross-checked against `order_status`'s `filled_quantity`, which
+  on IBKR reports a **cash-quantity order's fill in DOLLARS**: `qty: 2.0` for a US$2 buy of a $317 stock
+  is the bug, the truth is `0.0063`). **The USD deployed goes in `cash_qty`** — that field exists exactly
+  so the dollar figure has an honest home and never squats in `qty`. `write-thesis` now **REFUSES** a
+  `qty` that can't be reconciled with `cash_qty`/`entry_price`, but do not lean on the guard — record the
+  right unit. **The tranche guard sums `qty`, so a thesis without it is invisible to tranche accounting**
+  (and a thesis with dollars in it silently corrupts every future sell, the P&L and the scorecard).
+  Record a daily `nav-snapshot`. Two lots of the same ticker on the same day
   (e.g. a `core` and a `tactical`) are stored as separate records — on any `read-thesis`/`close-thesis`
   call that hits an ambiguity error, pass `horizon_tag` to pick the lot; to deliberately UPDATE an
   existing thesis, pass `"overwrite": true` (a plain re-write creates a new lot, never clobbers).
 - **After an executed partial sell (a trim), run `reduce-thesis-qty` before ending the session** —
-  `{"ticker", "open_date", "qty_sold": <filled qty>}` (plus `horizon_tag` if the ticker has several
+  `{"ticker", "open_date", "qty_sold": <filled qty, in SHARES/base units — never dollars>}` (plus
+  `horizon_tag` if the ticker has several
   same-day lots). The tranche guard approves sells against the summed thesis `qty`; an undecremented
   thesis is a phantom balance. If the remaining qty hits 0 it points you to `close-thesis` (which owns
   `exit_price`/`realized_pnl`) — it never closes on its own.

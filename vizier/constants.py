@@ -36,3 +36,26 @@ AUTONOMY_WINDOW_SECONDS = 24 * 60 * 60  # 24h
 # sitting exactly on a limit (e.g. 25.0% against a 25% cap) is not rejected by
 # floating-point dust.
 LIMIT_EPSILON = 1e-9
+
+# Quantity comparison tolerance (shares / base units). Used when an exit is
+# compared against the held position: the held quantity is a HARD ceiling, so
+# this only absorbs float dust (a fractional share is ~1e-4, orders of magnitude
+# above this) and never lets a real oversize slip through.
+QTY_EPSILON = 1e-9
+
+# ── Unit-confusion guard (the US$-quantity bug) ──────────────────────────────
+# A "cash quantity" order is sized in DOLLARS (`buy(symbol, cash_amount=2)`), and
+# a real IBKR fill of $2 of AAPL @ $317.25 acquired 0.0063 shares. Any number
+# whose unit is implicit is a hazard here, so the core cross-checks a recorded
+# `qty` (shares) against `cash_qty / entry_price` (the shares those dollars could
+# possibly have bought).
+#
+# Tolerance for "qty agrees with cash_qty/entry_price": generous enough to absorb
+# commission, slippage between the quote and the fill, and rounding — but far
+# tighter than the order-of-magnitude error a dollars-as-shares mix-up produces.
+QTY_CASH_CONSISTENCY_TOLERANCE = 0.25  # 25%
+
+# How far the entry price must sit from 1.0 for the dollars-as-shares signature
+# (`qty == cash_qty`) to be conclusive. At a price of exactly $1 the two units
+# coincide and the number is ambiguous but harmless; away from 1.0 it is a bug.
+QTY_CASH_UNIT_PRICE_RATIO = 1.5

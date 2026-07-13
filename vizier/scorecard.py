@@ -27,6 +27,8 @@ from bisect import bisect_right
 from datetime import date
 from typing import Any
 
+from .risk import check_fill_units
+
 # Fraction of cost basis → percent, and the tags the aggregates group by.
 _PERCENT = 100.0
 _HORIZON_TAGS = ("core", "tactical")
@@ -94,6 +96,16 @@ def _score_thesis(
         return skip("missing ticker/open_date")
     if entry_price is None or float(entry_price) <= 0 or qty is None or float(qty) <= 0:
         return skip("missing/non-positive entry_price or qty - cannot compute a return")
+
+    # `qty` MUST be shares/base units. A record written before the unit guard (or
+    # hand-edited) could hold DOLLARS there — IBKR reports a cash-quantity order's
+    # fill in dollars — and `entry * quantity` would then report a P&L off by the
+    # share price. Naming it in `skipped` is honest; a fabricated number is not.
+    units = check_fill_units(
+        qty=qty, cash_qty=thesis.get("cash_qty"), entry_price=entry_price
+    )
+    if units["unit_error"] or (units["checked"] and not units["consistent"]):
+        return skip(f"qty is not a usable share quantity - {units['reason']}")
 
     entry = float(entry_price)
     quantity = float(qty)

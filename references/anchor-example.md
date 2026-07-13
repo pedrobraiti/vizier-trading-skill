@@ -87,12 +87,17 @@ $100"), walk these steps. It exercises every part of the design; deviate only wi
 9. **Execute / confirm / record (per the mode) — journal EACH leg before starting the next.**
    - **Confirmation:** present the plan (output template), wait for OK, then per leg: re-verify
      `session_status`, `reconcile`, **IBKR** `preview_order` → `buy(cash_amount=)` (market) → confirm via
-     `order_status`/`wait_for_fill` → place the stop POST-fill from `filled_quantity`; **crypto** estimate
+     `order_status`/`wait_for_fill` → then **read `positions` for the exact held quantity and size the
+     stop POST-fill with `exit-qty`** (NEVER from `filled_quantity`: on a US$ order IBKR reports the fill
+     in DOLLARS — a $2 AAPL buy came back as `2.0` against 0.0063 shares held, and a 2-share stop on it
+     is a naked short); **crypto** estimate
      via `get_quote` + check the notional minimum → `buy(cash_amount=)` → poll `order_status` → place the
      **exchange-native `stop_order`** POST-fill (stop-LIMIT: `limit_price` at/just below the stop;
-     disclose the gap risk) — soft skill-managed stop ONLY if the venue refuses native stops.
+     disclose the gap risk; base qty from `exit-qty` against the `positions` balance) — soft
+     skill-managed stop ONLY if the venue refuses native stops.
      **Then, still on THIS leg: `append-decision` the fill + `write-thesis` (with its
-     `baseline_snapshot` and the filled `qty`) — only then move to the next leg.** Never batch the
+     `baseline_snapshot`, the filled `qty` in SHARES/base units, and the USD in `cash_qty`) — only then
+     move to the next leg.** Never batch the
      journaling to the end of the round: a crash between leg 2 and leg 3 must leave two journaled fills,
      not two phantom positions (SKILL.md safety rules; same discipline as autonomy).
    - **Autonomy:** run the arming checklist once, `begin-run` at the start of this round, then per leg

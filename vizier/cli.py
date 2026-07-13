@@ -250,6 +250,34 @@ def _cmd_trim_qty(payload: dict[str, Any], args: argparse.Namespace) -> Any:
     return result
 
 
+def _cmd_exit_qty(payload: dict[str, Any], args: argparse.Namespace) -> Any:
+    """Size a protective stop / any exit so it can never exceed the holding.
+
+    ``position_qty`` (from the venue's ``positions`` tool) is the hard ceiling —
+    a fill quantity is only ever a cross-check, because IBKR reports a
+    cash-quantity (US$) order's fill in DOLLARS.
+    """
+    result = risk.exit_quantity(
+        position_qty=payload.get("position_qty"),
+        requested_qty=payload.get("requested_qty"),
+        filled_quantity=payload.get("filled_quantity"),
+        filled_quantity_is_estimate=payload.get("filled_quantity_is_estimate", False),
+        filled_cash=payload.get("filled_cash"),
+        is_cash_quantity=payload.get("is_cash_quantity", False),
+        step=payload.get("step"),
+    )
+    # Optional tranche cross-check, same as `trim-qty`: a tactical exit must not
+    # eat the core tranche. The position cap above already bounds the SIZE; this
+    # bounds WHICH tranche it may come out of.
+    tag = payload.get("tag")
+    ticker = payload.get("ticker")
+    if tag is not None and ticker is not None:
+        result["tranche_check"] = memory.check_tranche_sell(
+            ticker, tag, result["qty"], memory_dir=args.memory_dir
+        )
+    return result
+
+
 def _cmd_provenance(payload: dict[str, Any], args: argparse.Namespace) -> Any:
     return reconcile.position_provenance(payload["ticker"], payload["theses"])
 
@@ -321,6 +349,7 @@ COMMANDS = {
     "reconcile": _cmd_reconcile,
     "build-own-sent-orders": _cmd_build_own_sent_orders,
     "trim-qty": _cmd_trim_qty,
+    "exit-qty": _cmd_exit_qty,
     "provenance": _cmd_provenance,
     "data-sufficiency": _cmd_data_sufficiency,
     "arm-autonomy": _cmd_arm_autonomy,

@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to adhere to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **An exit can no longer be sized larger than the position — the US$-order unit bug (found live, with
+  a real US$2 IBKR fill).** IBKR reports the cumulative fill of a **cash-quantity** order — `buy(symbol,
+  cash_amount=…)`, *the* documented entry path for equities — **in DOLLARS, not shares**: a real
+  `buy(AAPL, cash_amount=2)` returned `filled_quantity = 2.0` while the position actually acquired was
+  **0.0063 shares** @ $317.25. The skill's own docs said to read `filled_quantity` post-fill, size the
+  protective stop from it, and write it into the thesis as `qty` — so, followed literally, Vizier would
+  have placed a **SELL STOP for 2 shares against 0.0063 held** (a ~317x oversell — a naked short) and
+  poisoned the tranche guard, the P&L and the scorecard with a dollar figure masquerading as a share
+  count. Fixed structurally, not by trusting a corrected field:
+  - **New core command `exit-qty`** (`vizier.risk.exit_quantity`) sizes **every** exit — protective stop,
+    sell, trim. `position_qty` (from the venue's `positions` tool — the authority; it returned exactly
+    `0.0063` for the live fill) is **required and is a hard ceiling**: no combination of inputs can make
+    it return more than is held. It refuses outright when no position is resolved (a stop with no
+    position is a naked short, not a smaller mistake), rounds DOWN to the lot, treats `filled_quantity`
+    as a **cross-check only** — flagging one that exceeds the position, and never trusting one Valet
+    marks an estimate (a partial fill of a cash order yields no exact share count) — and points a full
+    exit at `close_position`, which resolves the exact fraction itself.
+  - **`write-thesis` now REFUSES a `qty` in the wrong unit.** `qty` is validated as a positive share/base
+    quantity and cross-checked against `cash_qty`/`entry_price` (`vizier.risk.check_fill_units`): a `qty`
+    that equals the cash amount while the price sits far from $1 is dollars-as-shares and is rejected at
+    the door, as is any `qty` that cannot be reconciled with the dollars deployed. The USD belongs in the
+    existing `cash_qty` field — the dollar figure's only legitimate home.
+  - **`trim-qty` now requires `current_qty`** in both modes (it was optional in dollar mode, where an
+    unbounded `dollars / price` could size an exit larger than the position). The holding is the ceiling
+    that makes an oversell impossible, so it is mandatory rather than merely recommended.
+  - **`scorecard` refuses to score a thesis whose `qty` is not a usable share quantity.** A record
+    written before this guard (or hand-edited) could hold dollars in `qty`, and `entry_price * qty` would
+    report a P&L off by the share price. It is now NAMED in `skipped` with the reason instead — the
+    scorecard's whole value is that its verdict is trustworthy, so a fabricated number is worse than none.
+  - **Docs rewritten wherever the old instruction lived** — `SKILL.md` (safety rules + memory discipline
+    + core command table), `references/execution-mechanics.md` (new **Units** table; the IBKR order flow's
+    post-fill step), `references/pipeline.md`, `references/anchor-example.md`, `memory/theses/
+    EXAMPLE_thesis.yaml`, `README.md`. Units are now stated explicitly everywhere a quantity appears
+    (`qty`/`quantity`/`position_qty` = shares/base units; `cash_amount`/`cash_qty`/`filled_cash` = USD) —
+    the whole class of bug here is a number whose unit is implicit.
+  - **Venue accuracy:** this is **IBKR-specific**. The crypto/CCXT side reports `filled` in base units
+    already and was never broken — the docs now say so explicitly, so nobody "fixes" it into existence
+    there. The `positions`-first exit discipline is identical on both venues regardless.
+
 ## [0.4.0] - 2026-07-11
 
 ### Added

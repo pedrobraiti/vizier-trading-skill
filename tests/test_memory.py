@@ -77,6 +77,46 @@ def test_thesis_null_qty_raises(memory_dir):
         memory.write_thesis(bad, memory_dir=memory_dir)
 
 
+def test_thesis_qty_in_dollars_is_refused(memory_dir):
+    """REGRESSION (live bug, 2026-07-13): `buy(AAPL, cash_amount=2)` filled 0.0063
+    shares @ $317.25 and IBKR reported filled_quantity = 2.0 — the DOLLARS. Writing
+    that as `qty` would corrupt the tranche guard, the P&L and the scorecard, so the
+    store refuses the wrong UNIT at the door."""
+    bad = _sample_thesis(qty=2.0)
+    bad["entry_price"] = 317.25
+    bad["cash_qty"] = 2.0  # the dollars deployed — qty == cash_qty is the signature
+    with pytest.raises(ValueError, match="wrong UNIT"):
+        memory.write_thesis(bad, memory_dir=memory_dir)
+
+
+def test_thesis_qty_in_shares_with_cash_qty_is_accepted(memory_dir):
+    """The CORRECT record for that same dollar buy: qty in shares, dollars in cash_qty."""
+    good = _sample_thesis(ticker="AAPL", qty=0.0063)
+    good["entry_price"] = 317.25
+    good["cash_qty"] = 2.0
+    memory.write_thesis(good, memory_dir=memory_dir)
+    loaded = memory.read_thesis("AAPL", "2026-01-15", memory_dir=memory_dir)
+    assert loaded["qty"] == pytest.approx(0.0063)
+    assert loaded["cash_qty"] == 2.0
+    # And tranche accounting now sees the real share count, not 2.0.
+    assert memory.tranche_balances("AAPL", memory_dir=memory_dir)["core"] == pytest.approx(0.0063)
+
+
+def test_thesis_qty_inconsistent_with_cash_and_price_is_refused(memory_dir):
+    """Not just the exact dollars-as-shares signature: any qty that cannot be
+    reconciled with cash_qty/entry_price is a mis-recorded fill."""
+    bad = _sample_thesis(qty=5.0)
+    bad["entry_price"] = 100.0
+    bad["cash_qty"] = 2.0  # $2 at $100 cannot be 5 shares
+    with pytest.raises(ValueError, match="inconsistent"):
+        memory.write_thesis(bad, memory_dir=memory_dir)
+
+
+def test_thesis_non_positive_qty_raises(memory_dir):
+    with pytest.raises(ValueError, match="positive"):
+        memory.write_thesis(_sample_thesis(qty=0), memory_dir=memory_dir)
+
+
 def test_crypto_ticker_slash_is_filename_safe(memory_dir):
     memory.write_thesis(
         _sample_thesis(ticker="BTC/USDT"), memory_dir=memory_dir

@@ -289,7 +289,16 @@ python -m vizier profile                                            # show the a
 python -m vizier allocate --json '{"total_amount":100,"nav":10000,"explicit_order":true,"candidates":[{"ticker":"AAA","conviction":5},{"ticker":"BBB","conviction":3}]}'
 python -m vizier autonomy-gate --json '{"candidate_value":200,"current_nav":990}'   # composed §B verdict
 python -m vizier trim-qty --json '{"current_qty":2.0,"pct":30,"step":0.001}'        # %/$ -> sell qty, rounds down
+python -m vizier exit-qty --json '{"position_qty":0.0063,"filled_quantity":2.0,"is_cash_quantity":true}'  # stop/exit qty, capped at the holding
 ```
+
+**Units are never implicit.** `qty`/`quantity`/`position_qty` = **shares or crypto base units**;
+`cash_amount`/`cash_qty`/`filled_cash` = **USD**. Every exit (protective stop, sell, trim) is sized from
+the venue's `positions` through `exit-qty`, which **cannot return more than you hold** — because IBKR
+reports a cash-quantity (US$) order's fill in *dollars*: a real `buy(AAPL, cash_amount=2)` came back as
+`filled_quantity = 2.0` for a position of **0.0063 shares**, and a stop sized off that number would have
+been a naked short. (Crypto/CCXT reports base units correctly; the hazard is IBKR-specific, the
+`positions`-first rule is universal.)
 
 Risk posture is **one editable file** — `config/risk_profile.yaml`: flip `active_profile`
 (`conservative | moderate | aggressive`) or tweak a single number. Every limit is a percent of NAV, so it
