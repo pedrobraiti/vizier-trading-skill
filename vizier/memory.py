@@ -56,8 +56,9 @@ from typing import Any
 
 import yaml
 
-from .constants import AUTONOMY_WINDOW_SECONDS
+from .constants import AUTONOMY_WINDOW_SECONDS, QTY_EPSILON
 from .risk import check_fill_units
+from .validation import finite_number, non_negative_number, positive_number, valid_nav
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -424,13 +425,52 @@ def list_all_theses(
     return out
 
 
+def _fully_reduced_defaults(
+    record: dict[str, Any],
+    exit_price: float | None,
+    realized_pnl: float | None,
+) -> tuple[float, float]:
+    """Resolve ``exit_price``/``realized_pnl`` for a close.
+
+    Both are required, except when every share already left through priced
+    ``reduce_thesis_qty`` calls (remaining qty 0): then the close only seals the
+    record, and the defaults are the last partial exit's price and the sum of the
+    partial exits' realized P&L — exact, nothing guessed.
+    """
+    partial_exits = record.get("partial_exits") or []
+    remaining = float(record.get("qty") or 0.0)
+    all_priced = bool(partial_exits) and all(
+        event.get("realized_pnl") is not None for event in partial_exits
+    )
+    fully_reduced = remaining <= QTY_EPSILON and all_priced
+    if exit_price is None:
+        if not fully_reduced:
+            raise ValueError(
+                "close-thesis needs exit_price (the fill price of the closing sell); it may "
+                "be omitted only when every share already left through priced "
+                "reduce-thesis-qty calls"
+            )
+        exit_price = partial_exits[-1]["exit_price"]
+    if realized_pnl is None:
+        if not fully_reduced:
+            raise ValueError(
+                "close-thesis needs realized_pnl - the thesis TOTAL net P&L across all its "
+                "sells, fees included"
+            )
+        realized_pnl = sum(float(event["realized_pnl"]) for event in partial_exits)
+    return (
+        positive_number(exit_price, "exit_price"),
+        finite_number(realized_pnl, "realized_pnl"),
+    )
+
+
 def close_thesis(
     ticker: str,
     open_date: str,
     *,
     close_date: str,
-    exit_price: float,
-    realized_pnl: float,
+    exit_price: float | None = None,
+    realized_pnl: float | None = None,
     alpha_vs_spy: float | None = None,
     lesson: str | None = None,
     horizon_tag: str | None = None,
@@ -440,10 +480,17 @@ def close_thesis(
 ) -> dict[str, Any]:
     """Close a thesis in place, adding the §F realized-outcome fields. The
     baseline_snapshot and the rest of the open record are preserved untouched.
-    With several same-day lots, ``horizon_tag`` picks which one to close."""
+    With several same-day lots, ``horizon_tag`` picks which one to close.
+
+    ``realized_pnl`` is the thesis **TOTAL net** realized P&L — every sell of
+    this lot, earlier trims (``partial_exits``) included, fees included. It is
+    what the scorecard scores. When the lot was already fully sold through
+    priced trims, ``exit_price``/``realized_pnl`` may be omitted and are derived
+    from ``partial_exits``."""
     memory_dir = Path(memory_dir)
     path = _locate_thesis(ticker, open_date, memory_dir, horizon_tag=horizon_tag)
     record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    exit_price, realized_pnl = _fully_reduced_defaults(record, exit_price, realized_pnl)
     record.update(
         status="closed",
         close_date=close_date,
@@ -498,6 +545,9 @@ def reduce_thesis_qty(
     open_date: str,
     qty_sold: float,
     *,
+    exit_price: float | None = None,
+    fees: float = 0.0,
+    exit_date: str | None = None,
     horizon_tag: str | None = None,
     memory_dir: str | Path = DEFAULT_MEMORY_DIR,
     commit: bool = False,
@@ -514,15 +564,25 @@ def reduce_thesis_qty(
     here would silently wipe out a fractional position's whole balance (or blow
     past it and raise). Convert a %/$ trim with ``trim_quantity`` first.
 
+    The record stays reconcilable for the scorecard:
+      * ``qty_opened`` / ``cash_qty_opened`` freeze the original lot (set once);
+      * ``cash_qty`` (US$ basis) shrinks in proportion to ``qty``, so the
+        ``qty`` vs ``cash_qty/entry_price`` unit check still agrees;
+      * each trim appends to ``partial_exits`` with its quantity, ``exit_price``,
+        ``fees`` and the net ``realized_pnl`` of that leg. Pass ``exit_price``
+        (the sell's average fill price) — without it the leg's P&L is unknown and
+        the scorecard names the thesis as unscorable rather than guessing.
+
     Never closes the thesis on its own: a qty that reaches exactly 0 returns a
-    note pointing to ``close_thesis`` — the exit price and realized P&L belong
-    to the close, not to a quantity decrement.
+    note pointing to ``close_thesis``.
     """
     if not math.isfinite(float(qty_sold)) or qty_sold <= 0:
         raise ValueError(
             f"qty_sold must be a positive, finite quantity in shares/base units "
             f"(not dollars), got {qty_sold!r}"
         )
+    sale_price = None if exit_price is None else positive_number(exit_price, "exit_price")
+    sale_fees = non_negative_number(fees, "fees")
     memory_dir = Path(memory_dir)
     path = _locate_thesis(ticker, open_date, memory_dir, horizon_tag=horizon_tag)
     record = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -535,7 +595,24 @@ def reduce_thesis_qty(
             "fill against the thesis store before journaling"
         )
     remaining = max(remaining, 0.0)
+    record.setdefault("qty_opened", previous_qty)
+    record.setdefault("cash_qty_opened", record.get("cash_qty"))
+    if record.get("cash_qty") is not None and previous_qty > 0:
+        record["cash_qty"] = float(record["cash_qty"]) * remaining / previous_qty
     record["qty"] = remaining
+    entry_price = record.get("entry_price")
+    realized = None
+    if sale_price is not None and entry_price is not None:
+        realized = (sale_price - float(entry_price)) * float(qty_sold) - sale_fees
+    record.setdefault("partial_exits", []).append(
+        {
+            "date": exit_date or _now_iso()[:10],
+            "qty": float(qty_sold),
+            "exit_price": sale_price,
+            "fees": sale_fees,
+            "realized_pnl": realized,
+        }
+    )
     path.write_text(
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -554,11 +631,20 @@ def reduce_thesis_qty(
         "previous_qty": previous_qty,
         "qty_sold": float(qty_sold),
         "remaining_qty": remaining,
+        "remaining_cash_qty": record.get("cash_qty"),
+        "realized_pnl": realized,
     }
+    if sale_price is None:
+        result["warning"] = (
+            "no exit_price given - this leg's realized P&L is unknown, so the scorecard "
+            "lists the open thesis as unscorable until it is closed (close-thesis "
+            "realized_pnl is the thesis TOTAL, this leg included)"
+        )
     if remaining == 0.0:
         result["note"] = (
-            "qty is now 0 - run close-thesis to record the exit_price/realized_pnl "
-            "(reduce-thesis-qty never closes on its own)"
+            "qty is now 0 - run close-thesis to seal the record (exit_price/realized_pnl "
+            "may be omitted when every trim was priced; reduce-thesis-qty never closes "
+            "on its own)"
         )
     return result
 
@@ -582,6 +668,8 @@ def append_decision(
     memory_dir = Path(memory_dir)
     record = dict(entry)
     record.setdefault("timestamp", _now_iso())
+    for order in record.get("executed_orders") or []:
+        _validated_order_value(order)
     _append_jsonl(Path(memory_dir) / DECISION_LOG_NAME, record)
     _maybe_commit(
         f"decision: {record.get('intent', 'log')}",
@@ -687,9 +775,27 @@ def _aggregate_executions(
         for order in entry.get("executed_orders", []) or []:
             executed.append(order)
             trades += 1
-            if str(order.get("side", "")).upper() in BUY_SIDES:
-                spent += float(order.get("value") or 0.0)
+            buy_value = _validated_order_value(order)
+            if buy_value is not None:
+                spent += buy_value
     return spent, trades, executed
+
+
+def _validated_order_value(order: dict[str, Any]) -> float | None:
+    """The spend a journaled order consumes: its BUY ``value``, else None.
+
+    A BUY ``value`` must be present, finite and non-negative — a negative one
+    used to SUBTRACT from the day's spend and free budget (-1000 journaled let a
+    600 candidate through on a 1000 NAV). Refused at append, and an invalid row
+    already on disk fails the aggregation closed instead of being summed.
+    """
+    side = str(order.get("side", "")).upper()
+    value = order.get("value")
+    if side in BUY_SIDES:
+        return non_negative_number(value, f"executed BUY {order.get('ticker')} value")
+    if value is not None:
+        non_negative_number(value, f"executed {side or 'order'} {order.get('ticker')} value")
+    return None
 
 
 def arm_autonomy(
@@ -713,8 +819,7 @@ def arm_autonomy(
     spend (the §B drain vector). A legitimate re-arm runs only after an explicit
     ``disarm_autonomy`` (so ``active`` is None) or after the window expires.
     """
-    if nav <= 0:
-        raise ValueError("nav must be positive")
+    nav = valid_nav(nav)
     memory_dir = Path(memory_dir)
     moment = _parse_dt(now) or datetime.now(UTC)
     iso = moment.isoformat()
@@ -998,7 +1103,10 @@ def record_nav_snapshot(
     runner: GitRunner | None = None,
 ) -> dict[str, Any]:
     """Append a NAV snapshot. Neither MCP keeps a NAV history (spec, §A), so the
-    circuit-breaker's monthly-drawdown leg depends entirely on this series."""
+    circuit-breaker's monthly-drawdown leg depends entirely on this series.
+    A NaN/infinite/non-positive NAV is refused: one bad point would poison every
+    later drawdown read."""
+    net_liquidation = valid_nav(net_liquidation, "net_liquidation")
     memory_dir = Path(memory_dir)
     record = {
         "timestamp": timestamp or _now_iso(),

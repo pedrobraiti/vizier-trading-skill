@@ -596,3 +596,90 @@ def test_commit_skips_push_without_a_remote(memory_dir):
 
     memory.commit_memory("backup", memory_dir=memory_dir, runner=runner_no_remote)
     assert not any(args and args[0] == "push" for args in calls)
+
+
+# ── Audit 10/10 item 2 (journal) + item 6 (trim bookkeeping) ──────────────────
+
+
+def test_audit_negative_buy_cannot_be_journaled(memory_dir):
+    """REGRESSION (audit item 2): a BUY of -1000 SUBTRACTED from the day's spend,
+    freeing budget for a 600 candidate on a 1000 NAV. Refused at append."""
+    with pytest.raises(ValueError, match="BUY SYNTH value"):
+        memory.append_decision(
+            {"executed_orders": [{"ticker": "SYNTH", "side": "BUY", "value": -1000}]},
+            memory_dir=memory_dir,
+        )
+    assert memory.read_decision_log(memory_dir=memory_dir) == []
+
+
+def test_buy_without_value_cannot_be_journaled(memory_dir):
+    with pytest.raises(ValueError, match="required"):
+        memory.append_decision(
+            {"executed_orders": [{"ticker": "SYNTH", "side": "BUY"}]}, memory_dir=memory_dir
+        )
+
+
+def test_invalid_buy_already_on_disk_fails_the_day_state_closed(memory_dir):
+    """A hand-edited/legacy row with a negative BUY must not be summed."""
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 10, 15, tzinfo=UTC)
+    memory.arm_autonomy(1000, now=now, memory_dir=memory_dir)
+    row = {
+        "timestamp": now.isoformat(),
+        "executed_orders": [{"ticker": "SYNTH", "side": "BUY", "value": -1000}],
+    }
+    log_path = memory_dir / memory.DECISION_LOG_NAME
+    log_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative"):
+        memory.autonomy_day_state(now=now, memory_dir=memory_dir)
+
+
+@pytest.mark.parametrize("bad_nav", [float("nan"), float("inf"), 0, -1])
+def test_arm_and_snapshot_refuse_invalid_nav(memory_dir, bad_nav):
+    with pytest.raises(ValueError):
+        memory.arm_autonomy(bad_nav, memory_dir=memory_dir)
+    with pytest.raises(ValueError):
+        memory.record_nav_snapshot(bad_nav, venue="ibkr", memory_dir=memory_dir)
+
+
+def test_trim_scales_cash_qty_and_records_the_realized_leg(memory_dir):
+    thesis = _sample_thesis(qty=10)
+    thesis.update(entry_price=10.0, cash_qty=100.0)
+    memory.write_thesis(thesis, memory_dir=memory_dir)
+    result = memory.reduce_thesis_qty(
+        "ACME", "2026-01-15", 4, exit_price=12.5, fees=0.25, exit_date="2026-02-01",
+        memory_dir=memory_dir,
+    )
+    assert result["remaining_qty"] == pytest.approx(6.0)
+    assert result["remaining_cash_qty"] == pytest.approx(60.0)
+    assert result["realized_pnl"] == pytest.approx((12.5 - 10.0) * 4 - 0.25)
+    record = memory.read_thesis("ACME", "2026-01-15", memory_dir=memory_dir)
+    assert record["qty_opened"] == pytest.approx(10.0)
+    assert record["cash_qty_opened"] == pytest.approx(100.0)
+    assert record["partial_exits"] == [
+        {"date": "2026-02-01", "qty": 4.0, "exit_price": 12.5, "fees": 0.25,
+         "realized_pnl": pytest.approx(9.75)}
+    ]
+    # Still a valid record: an overwrite re-runs the unit guard and passes.
+    memory.write_thesis(record, overwrite=True, memory_dir=memory_dir)
+
+
+def test_trim_without_price_warns_that_the_leg_is_unpriced(memory_dir):
+    memory.write_thesis(_sample_thesis(qty=10), memory_dir=memory_dir)
+    result = memory.reduce_thesis_qty("ACME", "2026-01-15", 2, memory_dir=memory_dir)
+    assert result["realized_pnl"] is None
+    assert "no exit_price" in result["warning"]
+
+
+def test_close_requires_price_and_pnl_unless_fully_sold_through_priced_trims(memory_dir):
+    memory.write_thesis(_sample_thesis(qty=10), memory_dir=memory_dir)
+    with pytest.raises(ValueError, match="exit_price"):
+        memory.close_thesis(
+            "ACME", "2026-01-15", close_date="2026-03-01", memory_dir=memory_dir
+        )
+    with pytest.raises(ValueError, match="realized_pnl"):
+        memory.close_thesis(
+            "ACME", "2026-01-15", close_date="2026-03-01", exit_price=150.0,
+            memory_dir=memory_dir,
+        )

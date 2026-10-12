@@ -45,6 +45,9 @@ crypto `account_type` as a self-report, and never let it alone authorize a live 
 2. `market_status` → tradeable now? (`crypto` is `ALWAYS_OPEN`; IBKR is RTH-only with NYSE holidays.)
 3. `portfolio` / `positions` + `account_summary` → read the **real** book. NAV (`net_liquidation`) is the
    denominator for limits; free cash / `available_funds` is what you can actually deploy this round.
+   Resolve it through `python -m vizier nav` on both venues: the crypto `account_summary` returns
+   `net_liquidation: null` and `available_funds` = FREE quote cash only, so the crypto NAV is computed
+   from cash + priced `positions` (refused, with a `missing` list, if any price/FX rate is absent).
    Buying power ≠ NAV (margin) — never size off buying power.
 4. `reconcile` your own recently-sent orders ∪ these positions (assume 30-45s lag) before deciding —
    never double a buy that's already in flight. See **"Building the `reconcile` input"** below — feeding
@@ -124,7 +127,8 @@ Consequences you MUST respect:
   (never oversells), caps at the held balance, and — pass `"ticker"` + `"tag"` — cross-checks
   `tranche-sell` so a tactical trim can't eat the core. Take the `%` against the **live `positions`
   balance**, not the (possibly stale) thesis `qty`. **After the trim fills, run `python -m vizier
-  reduce-thesis-qty --json '{"ticker": "...", "open_date": "...", "qty_sold": <filled BASE qty>}'`**
+  reduce-thesis-qty --json '{"ticker": "...", "open_date": "...", "qty_sold": <filled BASE qty>,
+  "exit_price": <avg fill price>, "fees": <fee, 0 if none>}'`**
   (add `"horizon_tag"` when the ticker has several same-day lots) — the tranche guard approves future
   sells against the summed thesis `qty`, so an undecremented thesis is a phantom balance it will happily
   approve against. `close_position(symbol)` sells the **whole** base balance and has a **~30s** cooldown
@@ -168,10 +172,12 @@ Consequences you MUST respect:
   Never leave a working order dangling between sessions unjournaled (it becomes a phantom position).
 - **After ANY executed partial sell (a trim, either venue): decrement the thesis.** Run
   `python -m vizier reduce-thesis-qty --json '{"ticker": "...", "open_date": "...", "qty_sold":
-  <filled qty, in SHARES/base units — never dollars>}'` (plus `"horizon_tag"` to pick the lot when the
-  ticker has several on one day) right
-  after the fill confirms, and before the session ends. If the remaining qty hits 0, it tells you to
-  run `close-thesis` (which records `exit_price`/`realized_pnl`) — it never closes on its own. Skipping
+  <filled qty, in SHARES/base units — never dollars>, "exit_price": <avg fill price>, "fees": <fee>}'`
+  (plus `"horizon_tag"` to pick the lot when the ticker has several on one day) right
+  after the fill confirms, and before the session ends. It shrinks `cash_qty` in proportion and records
+  the leg (qty/price/fees/net P&L) in `partial_exits`, keeping the lot scoreable. If the remaining qty
+  hits 0, it tells you to run `close-thesis` (whose `realized_pnl` is the thesis TOTAL; omit it after
+  priced trims and it is derived) — it never closes on its own. Skipping
   this leaves the tranche guard approving sells against a quantity you no longer hold.
 
 ## Building the `reconcile` input (avoid the double-buy guard's failure mode)

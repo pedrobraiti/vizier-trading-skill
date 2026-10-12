@@ -82,6 +82,7 @@ python -m vizier <command> --json '<payload>'
 | Position size by conviction / split a budget | `size` / `allocate` |
 | Will this trade breach a portfolio limit? | `limits` |
 | Circuit breaker (VIX / monthly drawdown) | `breaker` (feed it `drawdown` for the dd leg) |
+| **One venue's NAV** (the denominator for `size`/`allocate`/`limits`/`arm-autonomy`/`autonomy-gate`) | `nav` — IBKR: `reported_nav` = `net_liquidation`; crypto (no NAV reported): `cash` + `holdings` each with `price` **and** `price_currency`, `fx_rates` for any other currency (no peg assumed, not even USDT=USD), `cash_includes_reserved: true`. Missing price/rate → **refused** with a `missing` list; never value it at 0 |
 | NAV history → drawdown | `nav-snapshot` (write daily, with `venue`) / `drawdown` (pass `venue` — NAV is per venue, mixed series are refused) |
 | Thesis store | `write-thesis` / `read-thesis` / `list-theses` / `close-thesis` / `reduce-thesis-qty` (after a partial sell) / `update-reviewed` |
 | **Performance scorecard** ("how am I doing?") | `scorecard` — P&L, hit rate & benchmark alpha over ALL theses |
@@ -446,11 +447,15 @@ direction from a level is the same fabrication the verify-before-conceding rule 
   call that hits an ambiguity error, pass `horizon_tag` to pick the lot; to deliberately UPDATE an
   existing thesis, pass `"overwrite": true` (a plain re-write creates a new lot, never clobbers).
 - **After an executed partial sell (a trim), run `reduce-thesis-qty` before ending the session** —
-  `{"ticker", "open_date", "qty_sold": <filled qty, in SHARES/base units — never dollars>}` (plus
+  `{"ticker", "open_date", "qty_sold": <filled qty, in SHARES/base units — never dollars>,
+  "exit_price": <the sell's avg fill price>, "fees": <commission, 0 if none>}` (plus
   `horizon_tag` if the ticker has several
   same-day lots). The tranche guard approves sells against the summed thesis `qty`; an undecremented
-  thesis is a phantom balance. If the remaining qty hits 0 it points you to `close-thesis` (which owns
-  `exit_price`/`realized_pnl`) — it never closes on its own.
+  thesis is a phantom balance. It scales `cash_qty` with `qty` and logs the leg's net P&L in
+  `partial_exits`, so the scorecard keeps scoring the lot (an unpriced trim makes the open thesis
+  unscorable). If the remaining qty hits 0 it points you to `close-thesis` — it never closes on its own.
+  `close-thesis` `realized_pnl` is the thesis **TOTAL** net P&L (all sells, fees included); after
+  priced trims down to 0 you may omit `exit_price`/`realized_pnl` and they are derived exactly.
 - **Before an execution-grade buy, run a dedicated capital-structure / recent-filings check** — Scout's
   free news feed (GDELT) is not exhaustive and routinely misses raises, dilution, buybacks and M&A. Use
   `filing_search` / `sec_financials` / `ownership` (crypto: `crypto_onchain` unlocks/emissions) instead of

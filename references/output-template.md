@@ -141,9 +141,11 @@ crypto), then
 python -m vizier scorecard --json '{"as_of":"<today>", "prices":{"AAPL":234.5}, "benchmarks":{"ibkr":{"symbol":"SPY","series":[{"date":"...","close":...}]}}}'
 ```
 
-It scores every thesis (open marked-to-market, closed on the recorded `realized_pnl`) and aggregates
-hit rate, win/loss profile and same-window alpha — overall, per horizon and per venue. Present its
-numbers as they come: theses it cannot score are NAMED in `skipped` (surface them — usually a missing
-`qty`), null aggregates mean "no sample" (never report them as zero), and read any `benchmark_note`
-out loud (an uncovered or truncated benchmark window caveats the alpha). Exact payload details:
+It scores every thesis (open: priced trims + mark-to-market; closed: the recorded TOTAL `realized_pnl`)
+and aggregates hit rate, win/loss profile and same-window alpha — overall, per horizon and per venue.
+`return_pct` and `alpha_pct` are NET (`pnl / invested`); `price_return_pct` is the raw price move, never
+the headline. Present its numbers as they come: theses it cannot score are NAMED in `skipped` (surface
+them — usually a missing `qty` or an unpriced trim), null aggregates mean "no sample" (never report them
+as zero), and read any `benchmark_note` out loud (an uncovered or truncated benchmark window leaves the
+alpha null). Exact payload details:
 SKILL.md "Performance is MEASURED, not vibed".

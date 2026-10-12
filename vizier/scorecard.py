@@ -9,8 +9,11 @@ benchmark-relative alpha, hit rate, win/loss profile.
 Honesty rules (the same ones the rest of the core follows):
   * a thesis that can't be scored (missing qty/entry price/current price) is SKIPPED
     and NAMED in ``skipped`` — never silently dropped, never guessed;
-  * alpha is null when the benchmark series doesn't cover the thesis window, with the
-    reason attached — a fabricated benchmark is worse than none;
+  * P&L, return and alpha are NET and consistent: ``return_pct = pnl / invested`` and
+    ``alpha_pct = return_pct - benchmark return over the same window`` — never a gross
+    price move next to a net P&L;
+  * alpha is null when the benchmark series doesn't cover the thesis window at BOTH
+    ends, with the reason attached — a fabricated benchmark is worse than none;
   * aggregates over an empty set are null, not zero — "no closed theses" is not
     "0% hit rate".
 
@@ -33,10 +36,13 @@ from .risk import check_fill_units
 _PERCENT = 100.0
 _HORIZON_TAGS = ("core", "tactical")
 
-# A benchmark series whose last bar sits more than this many days before the
-# thesis window's end is comparing unequal windows (weekends/holidays make a few
-# days of slack normal; more than that means the series was truncated).
-_BENCHMARK_END_GAP_DAYS = 5
+# A benchmark close used for a window endpoint may sit at most this many days
+# before it (weekends/holidays make a few days of slack normal; more than that
+# means the series was truncated or has a hole, and the windows differ).
+_BENCHMARK_MAX_GAP_DAYS = 5
+
+# Relative tolerance when checking that opened = trimmed + remaining (float dust).
+_QTY_RECONCILE_TOLERANCE = 1e-6
 
 
 def _to_date(value: Any) -> date | None:
@@ -53,13 +59,15 @@ def _venue(ticker: str) -> str:
     return "crypto" if "/" in ticker else "ibkr"
 
 
-def _benchmark_price_at(series: list[tuple[date, float]], target: date) -> float | None:
-    """Last close at-or-before ``target`` (series pre-sorted). None when the series
-    starts after the target — an uncovered window must not fake a benchmark."""
+def _benchmark_bar_at(
+    series: list[tuple[date, float]], target: date
+) -> tuple[date, float] | None:
+    """Last (day, close) at-or-before ``target`` (series pre-sorted). None when the
+    series starts after the target — an uncovered window must not fake a benchmark."""
     index = bisect_right(series, (target, float("inf")))
     if index == 0:
         return None
-    return series[index - 1][1]
+    return series[index - 1]
 
 
 def _parse_benchmark(raw: dict[str, Any] | None) -> tuple[str | None, list[tuple[date, float]]]:
@@ -77,13 +85,73 @@ def _parse_benchmark(raw: dict[str, Any] | None) -> tuple[str | None, list[tuple
     return raw.get("symbol"), series
 
 
+def _benchmark_return(
+    series: list[tuple[date, float]], start: date, end: date
+) -> tuple[float | None, str | None]:
+    """Benchmark return over EXACTLY the thesis window, or (None, reason).
+
+    Each endpoint must have a close at-or-before it and no more than
+    ``_BENCHMARK_MAX_GAP_DAYS`` older: a series that is truncated (or has a hole)
+    at either end would silently backfill a stale close and compare unequal
+    windows — then there is no honest alpha, only a reason.
+    """
+    if not series:
+        return None, "no benchmark series passed"
+    start_bar = _benchmark_bar_at(series, start)
+    end_bar = _benchmark_bar_at(series, end)
+    if start_bar is None or end_bar is None:
+        return None, (
+            f"benchmark series does not cover the thesis window "
+            f"({start.isoformat()} → {end.isoformat()})"
+        )
+    for label, target, (bar_day, _) in (("start", start, start_bar), ("end", end, end_bar)):
+        gap_days = (target - bar_day).days
+        if gap_days > _BENCHMARK_MAX_GAP_DAYS:
+            return None, (
+                f"benchmark has no close within {_BENCHMARK_MAX_GAP_DAYS} days of the "
+                f"window {label} ({bar_day.isoformat()} vs {target.isoformat()}, "
+                f"{gap_days} days); alpha would compare unequal windows - not computed"
+            )
+    return (end_bar[1] / start_bar[1] - 1.0) * _PERCENT, None
+
+
+def _realized_from_partial_exits(
+    thesis: dict[str, Any], qty_opened: float, qty_remaining: float
+) -> tuple[float, str | None]:
+    """Net realized P&L of the trims already taken, or (0, reason) when the
+    bookkeeping cannot be trusted (an unpriced leg, or quantities that do not add
+    up to ``qty_opened``)."""
+    partial_exits = thesis.get("partial_exits") or []
+    sold = sum(float(event.get("qty") or 0.0) for event in partial_exits)
+    if abs(qty_opened - sold - qty_remaining) > _QTY_RECONCILE_TOLERANCE * qty_opened:
+        return 0.0, (
+            f"lot bookkeeping does not reconcile: opened {qty_opened:g} - trimmed "
+            f"{sold:g} != remaining {qty_remaining:g}"
+        )
+    unpriced = [event for event in partial_exits if event.get("realized_pnl") is None]
+    if unpriced:
+        return 0.0, (
+            f"{len(unpriced)} partial exit(s) recorded without exit_price - their realized "
+            "P&L is unknown; close the thesis with its TOTAL realized_pnl to score it"
+        )
+    return sum(float(event["realized_pnl"]) for event in partial_exits), None
+
+
 def _score_thesis(
     thesis: dict[str, Any],
     prices: dict[str, Any],
     benchmarks: dict[str, tuple[str | None, list[tuple[date, float]]]],
     as_of: date,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Score one thesis → (row, skipped). Exactly one of the pair is non-None."""
+    """Score one thesis → (row, skipped). Exactly one of the pair is non-None.
+
+    P&L and return are NET and computed from the same number: ``return_pct =
+    pnl / invested``, where ``invested`` is the cost of the whole lot as opened
+    (``qty_opened``, which survives trims). Alpha subtracts the benchmark over
+    the same window from that net return — a gross price move can never turn a
+    net loss into positive alpha. ``price_return_pct`` keeps the raw price move
+    for reference only.
+    """
     ticker = thesis.get("ticker")
     open_date = _to_date(thesis.get("open_date"))
     entry_price = thesis.get("entry_price")
@@ -94,22 +162,36 @@ def _score_thesis(
 
     if not ticker or open_date is None:
         return skip("missing ticker/open_date")
-    if entry_price is None or float(entry_price) <= 0 or qty is None or float(qty) <= 0:
+    qty_opened_raw = thesis.get("qty_opened", qty)
+    if (
+        entry_price is None
+        or float(entry_price) <= 0
+        or qty is None
+        or float(qty) < 0
+        or qty_opened_raw is None
+        or float(qty_opened_raw) <= 0
+    ):
         return skip("missing/non-positive entry_price or qty - cannot compute a return")
 
     # `qty` MUST be shares/base units. A record written before the unit guard (or
     # hand-edited) could hold DOLLARS there — IBKR reports a cash-quantity order's
     # fill in dollars — and `entry * quantity` would then report a P&L off by the
     # share price. Naming it in `skipped` is honest; a fabricated number is not.
+    # Checked on the lot AS OPENED: trims scale qty and cash_qty together.
     units = check_fill_units(
-        qty=qty, cash_qty=thesis.get("cash_qty"), entry_price=entry_price
+        qty=qty_opened_raw,
+        cash_qty=thesis.get("cash_qty_opened", thesis.get("cash_qty")),
+        entry_price=entry_price,
     )
     if units["unit_error"] or (units["checked"] and not units["consistent"]):
         return skip(f"qty is not a usable share quantity - {units['reason']}")
 
     entry = float(entry_price)
+    qty_opened = float(qty_opened_raw)
     quantity = float(qty)
-    invested = entry * quantity
+    if quantity > qty_opened * (1 + _QTY_RECONCILE_TOLERANCE):
+        return skip(f"qty {quantity:g} exceeds qty_opened {qty_opened:g}")
+    invested = entry * qty_opened
     status = thesis.get("status", "open")
 
     if status == "closed":
@@ -118,51 +200,53 @@ def _score_thesis(
         if exit_price is None or float(exit_price) <= 0:
             return skip("closed thesis without a usable exit_price")
         end_price = float(exit_price)
-        # The recorded realized_pnl is ground truth when present (it may include
-        # fees the price diff can't see); the price diff is the fallback.
+        # The recorded realized_pnl is the thesis TOTAL net P&L (fees and earlier
+        # trims included) — ground truth. Without it, rebuild from the priced
+        # trims plus the price diff on what was left (gross of that leg's fees).
         recorded = thesis.get("realized_pnl")
-        pnl = float(recorded) if recorded is not None else (end_price - entry) * quantity
+        if recorded is not None:
+            pnl = float(recorded)
+            pnl_basis = "recorded_realized_pnl"
+        else:
+            realized, problem = _realized_from_partial_exits(thesis, qty_opened, quantity)
+            if problem:
+                return skip(problem)
+            pnl = realized + (end_price - entry) * quantity
+            pnl_basis = "price_diff"
+        realized_part = pnl
     else:
         end_date = as_of
-        current = prices.get(ticker)
-        if current is None or float(current) <= 0:
-            return skip("open thesis with no current price passed in 'prices'")
-        end_price = float(current)
-        pnl = (end_price - entry) * quantity
+        realized_part, problem = _realized_from_partial_exits(thesis, qty_opened, quantity)
+        if problem:
+            return skip(problem)
+        if quantity == 0:
+            partial_exits = thesis.get("partial_exits") or []
+            if not partial_exits:
+                return skip("open thesis with qty 0 and no recorded exits")
+            end_price = float(partial_exits[-1]["exit_price"])
+        else:
+            current = prices.get(ticker)
+            if current is None or float(current) <= 0:
+                return skip("open thesis with no current price passed in 'prices'")
+            end_price = float(current)
+        pnl = realized_part + (end_price - entry) * quantity
+        pnl_basis = "mark_to_market"
 
-    return_pct = (end_price / entry - 1.0) * _PERCENT
+    return_pct = pnl / invested * _PERCENT
+    price_return_pct = (end_price / entry - 1.0) * _PERCENT
 
     venue = _venue(ticker)
     bench_symbol, bench_series = benchmarks.get(venue, (None, []))
     benchmark_return_pct: float | None = None
     alpha_pct: float | None = None
-    benchmark_note: str | None = None
     if not bench_series:
-        benchmark_note = f"no benchmark series passed for venue '{venue}'"
+        benchmark_note: str | None = f"no benchmark series passed for venue '{venue}'"
     else:
-        bench_start = _benchmark_price_at(bench_series, open_date)
-        bench_end = _benchmark_price_at(bench_series, end_date)
-        if bench_start is None or bench_end is None:
-            benchmark_note = (
-                f"benchmark series does not cover the thesis window "
-                f"({open_date.isoformat()} → {end_date.isoformat()})"
-            )
-        else:
-            benchmark_return_pct = (bench_end / bench_start - 1.0) * _PERCENT
+        benchmark_return_pct, benchmark_note = _benchmark_return(
+            bench_series, open_date, end_date
+        )
+        if benchmark_return_pct is not None:
             alpha_pct = return_pct - benchmark_return_pct
-            # A series truncated at the END passes the start/end lookups (the
-            # last close backfills) but silently compares unequal windows —
-            # annotate the alpha instead of suppressing it (honesty rule: the
-            # number stays, the caveat is named).
-            last_bench_day = bench_series[-1][0]
-            end_gap_days = (end_date - last_bench_day).days
-            if end_gap_days > _BENCHMARK_END_GAP_DAYS:
-                benchmark_note = (
-                    f"benchmark series ends {end_gap_days} days before the thesis "
-                    f"window's end ({last_bench_day.isoformat()} vs "
-                    f"{end_date.isoformat()}); alpha compares unequal windows - "
-                    "kept, but treat with caution"
-                )
 
     return (
         {
@@ -177,9 +261,14 @@ def _score_thesis(
             "entry_price": entry,
             "end_price": end_price,
             "qty": quantity,
+            "qty_opened": qty_opened,
             "invested": invested,
+            "open_cost_basis": entry * quantity if status != "closed" else 0.0,
             "pnl": pnl,
+            "realized_pnl": realized_part,
+            "pnl_basis": pnl_basis,
             "return_pct": return_pct,
+            "price_return_pct": price_return_pct,
             "benchmark_symbol": bench_symbol,
             "benchmark_return_pct": benchmark_return_pct,
             "alpha_pct": alpha_pct,
@@ -207,8 +296,12 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "closed_count": len(closed),
         "open_count": len(open_rows),
         "hit_rate_pct": (len(wins) / len(closed) * _PERCENT) if closed else None,
-        "realized_pnl": sum(r["pnl"] for r in closed) if closed else None,
-        "unrealized_pnl": sum(r["pnl"] for r in open_rows) if open_rows else None,
+        # Realized = closed theses + trims already taken on open ones; unrealized =
+        # the mark-to-market on what is still held.
+        "realized_pnl": sum(r["realized_pnl"] for r in rows) if rows else None,
+        "unrealized_pnl": (
+            sum(r["pnl"] - r["realized_pnl"] for r in open_rows) if open_rows else None
+        ),
         "avg_win": avg_win,
         "avg_loss": avg_loss,
         "win_loss_ratio": (
@@ -216,7 +309,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "avg_alpha_pct": _mean(alphas),
         "avg_days_held_closed": _mean([float(r["days_held"]) for r in closed]),
-        "open_invested": sum(r["invested"] for r in open_rows) if open_rows else None,
+        "open_invested": sum(r["open_cost_basis"] for r in open_rows) if open_rows else None,
     }
 
 
@@ -293,8 +386,11 @@ def compute_scorecard(
         "activity": activity,
         "note": (
             "Returns are simple period returns (no annualization; weigh days_held). "
-            "Closed P&L uses the recorded realized_pnl when present (may include fees); "
-            "open P&L is a mark-to-market on the passed prices and includes no fees. "
-            "Alpha is thesis return minus the same-window benchmark return."
+            "return_pct = pnl / invested (cost of the lot as opened): closed P&L is the "
+            "recorded TOTAL realized_pnl (fees and trims included); open P&L = priced "
+            "trims (net of their fees) + a fee-free mark-to-market of what is still held. "
+            "Alpha = that net return minus the benchmark's price return over the same "
+            "window (null when the series misses either end); price_return_pct is the "
+            "raw price move, for reference only."
         ),
     }

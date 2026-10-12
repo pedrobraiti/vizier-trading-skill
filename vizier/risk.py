@@ -21,10 +21,19 @@ import yaml
 from .constants import (
     LIMIT_EPSILON,
     MAX_CONVICTION,
+    MIN_CONVICTION,
     PERCENT,
     QTY_CASH_CONSISTENCY_TOLERANCE,
     QTY_CASH_UNIT_PRICE_RATIO,
     QTY_EPSILON,
+)
+from .validation import (
+    finite_number,
+    non_negative_int,
+    non_negative_number,
+    percentage,
+    positive_number,
+    valid_nav,
 )
 
 # ── Profile model ────────────────────────────────────────────────────────────
@@ -85,7 +94,7 @@ def load_profile(path: str | Path, name: str | None = None) -> RiskProfile:
     body = profiles[resolved_name]
     breaker = body["circuit_breaker"]
     autonomy = body["autonomy"]
-    return RiskProfile(
+    profile = RiskProfile(
         name=resolved_name,
         max_pct_per_asset=float(body["max_pct_per_asset"]),
         max_pct_per_sector=float(body["max_pct_per_sector"]),
@@ -109,6 +118,38 @@ def load_profile(path: str | Path, name: str | None = None) -> RiskProfile:
             drawdown_kill_pct=float(autonomy["drawdown_kill_pct"]),
         ),
     )
+    _validate_profile(profile)
+    return profile
+
+
+def _validate_profile(profile: RiskProfile) -> None:
+    """Range-check every knob: a typo (``max_pct_per_asset: 250``, a NaN, a zero
+    trade count) must fail at load, not silently mis-size every later decision."""
+    try:
+        percentage(profile.max_pct_per_asset, "max_pct_per_asset")
+        percentage(profile.max_pct_per_sector, "max_pct_per_sector")
+        percentage(profile.min_cash_pct, "min_cash_pct", allow_zero=True)
+        percentage(profile.conviction_full_size_pct_of_cap, "conviction_full_size_pct_of_cap")
+        if profile.max_positions < 1:
+            raise ValueError(f"max_positions must be >= 1, got {profile.max_positions}")
+        if not 0 <= profile.conviction_floor <= MAX_CONVICTION:
+            raise ValueError(
+                f"conviction_floor must be in [0, {MAX_CONVICTION}], "
+                f"got {profile.conviction_floor}"
+            )
+        positive_number(profile.circuit_breaker.vix_threshold, "circuit_breaker.vix_threshold")
+        percentage(
+            profile.circuit_breaker.monthly_drawdown_pct, "circuit_breaker.monthly_drawdown_pct"
+        )
+        percentage(profile.autonomy.per_run_pct, "autonomy.per_run_pct")
+        percentage(profile.autonomy.daily_cumulative_pct, "autonomy.daily_cumulative_pct")
+        percentage(profile.autonomy.drawdown_kill_pct, "autonomy.drawdown_kill_pct")
+        if profile.autonomy.per_run_max_trades < 1:
+            raise ValueError("autonomy.per_run_max_trades must be >= 1")
+        if profile.autonomy.daily_max_trades < 1:
+            raise ValueError("autonomy.daily_max_trades must be >= 1")
+    except ValueError as exc:
+        raise ValueError(f"risk profile '{profile.name}': {exc}") from None
 
 
 # Weighting modes the allocator officially supports. An explicit per-candidate
@@ -146,9 +187,22 @@ def position_size(
     Conviction below the profile floor is skipped (size 0) unless ``explicit_order``
     is set for this exact ticker — honesty over a forced trade, but an explicit
     order is still honored (spec, §10 + §E).
+
+    Inputs are validated, never sized through: ``nav`` and ``slot_base`` must be
+    finite and positive and ``conviction`` a whole number in 1-5 — a negative or
+    NaN base used to come back as a negative (short) "size".
     """
-    if nav <= 0:
-        raise ValueError("nav must be positive")
+    nav = valid_nav(nav)
+    slot_base = positive_number(slot_base, "slot_base")
+    conviction_value = finite_number(conviction, "conviction")
+    if not conviction_value.is_integer() or not (
+        MIN_CONVICTION <= conviction_value <= MAX_CONVICTION
+    ):
+        raise ValueError(
+            f"conviction must be a whole number in [{MIN_CONVICTION}, {MAX_CONVICTION}], "
+            f"got {conviction!r}"
+        )
+    conviction = int(conviction_value)
 
     skipped = conviction < profile.conviction_floor and not explicit_order
     if skipped:
@@ -253,10 +307,8 @@ def allocate_across_candidates(
     Each candidate dict needs at least ``ticker`` and ``conviction``; optional
     ``explicit`` (bool) and ``weight`` (float) per leg.
     """
-    if not math.isfinite(nav) or nav <= 0:
-        raise ValueError("nav must be positive")
-    if not math.isfinite(total_amount) or total_amount < 0:
-        raise ValueError("total_amount must be non-negative and finite")
+    nav = valid_nav(nav)
+    total_amount = non_negative_number(total_amount, "total_amount")
     # Validate the weighting mode UP FRONT — regardless of whether per-candidate
     # weights are present — so a garbage value ("momentum") fails loudly instead
     # of being silently ignored on the explicit-weights path.
@@ -388,16 +440,18 @@ def trim_quantity(
     if not math.isfinite(float(current_qty)) or float(current_qty) < 0:
         raise ValueError("current_qty must be a non-negative, finite quantity (shares/base units)")
 
+    current_qty = float(current_qty)
     if pct is not None:
+        pct = finite_number(pct, "pct")
         if not 0 < pct <= PERCENT:
             raise ValueError("pct must be in (0, 100]")
         raw = current_qty * pct / PERCENT
         mode = "pct"
     elif dollar_amount is not None:
-        if current_price is None or current_price <= 0:
+        if current_price is None:
             raise ValueError("dollar trim needs a positive current_price")
-        if dollar_amount < 0:
-            raise ValueError("dollar_amount must be non-negative")
+        current_price = positive_number(current_price, "current_price")
+        dollar_amount = non_negative_number(dollar_amount, "dollar_amount")
         raw = dollar_amount / current_price
         mode = "dollar"
     else:
@@ -410,8 +464,7 @@ def trim_quantity(
 
     qty = raw
     if step is not None:
-        if step <= 0:
-            raise ValueError("step must be positive")
+        step = positive_number(step, "step")
         # Floor to a whole number of steps. Round the ratio to kill float dust
         # BEFORE flooring so e.g. 2.9999999999 steps doesn't drop a whole step,
         # while never rounding UP past `raw` (the no-oversell guarantee).
@@ -618,8 +671,7 @@ def exit_quantity(
 
     qty = raw
     if step is not None:
-        if step <= 0:
-            raise ValueError("step must be positive")
+        step = positive_number(step, "step")
         # Floor to whole steps (kill float dust first, never round UP past `raw`).
         units = math.floor(round(raw / step, 9))
         qty = round(units * step, 12)
@@ -671,22 +723,26 @@ def check_position_limits(
     Denominator is NAV for every percentage limit (spec, §E). A position sitting
     exactly on a cap is allowed; only strictly over is a violation.
     """
-    nav = float(portfolio["nav"])
-    cash = float(portfolio.get("cash", 0.0))
+    nav = valid_nav(portfolio.get("nav"), "portfolio.nav")
+    cash = finite_number(portfolio.get("cash", 0.0), "portfolio.cash")
     positions = portfolio.get("positions", [])
-    if nav <= 0:
-        raise ValueError("nav must be positive")
 
     ticker = candidate["ticker"]
     sector = candidate.get("sector")
-    value = float(candidate["value"])
+    # A BUY is never negative: a negative value would read as freeing room under
+    # every cap at once (and raise the projected cash).
+    value = non_negative_number(candidate.get("value"), "candidate.value")
+    position_values = [
+        (p, finite_number(p.get("value"), f"positions[{p.get('ticker')}].value"))
+        for p in positions
+    ]
 
     held_tickers = {p["ticker"] for p in positions}
     is_new_position = ticker not in held_tickers
 
-    existing_ticker_value = sum(float(p["value"]) for p in positions if p["ticker"] == ticker)
+    existing_ticker_value = sum(v for p, v in position_values if p["ticker"] == ticker)
     existing_sector_value = sum(
-        float(p["value"]) for p in positions if sector is not None and p.get("sector") == sector
+        v for p, v in position_values if sector is not None and p.get("sector") == sector
     )
 
     post_ticker_pct = (existing_ticker_value + value) / nav * PERCENT
@@ -764,8 +820,14 @@ def circuit_breaker_status(
     ``monthly_drawdown_pct`` is a positive magnitude (18 means the book is down
     18% on the month). Either leg trips. A ``None`` input means "no data for this
     leg" — that leg simply does not contribute (the skill should treat missing
-    VIX/NAV history as a data-sufficiency problem, handled elsewhere).
+    VIX/NAV history as a data-sufficiency problem, handled elsewhere). A non-null
+    input must be a finite, non-negative number: a NaN compares False against the
+    threshold and would read as "calm".
     """
+    if vix is not None:
+        vix = non_negative_number(vix, "vix")
+    if monthly_drawdown_pct is not None:
+        monthly_drawdown_pct = non_negative_number(monthly_drawdown_pct, "monthly_drawdown_pct")
     legs: list[dict[str, Any]] = []
 
     if vix is not None and vix > profile.circuit_breaker.vix_threshold:
@@ -825,10 +887,10 @@ def cumulative_ceiling_check(
       * value: ``spent_today + candidate_value <= daily_cumulative_pct% of baseline``
       * count: ``trades_today + 1 <= daily_max_trades``
     """
-    if baseline_nav_start_of_day <= 0:
-        raise ValueError("baseline_nav_start_of_day must be positive")
-    if candidate_value < 0:
-        raise ValueError("candidate_value must be non-negative")
+    baseline_nav_start_of_day = valid_nav(baseline_nav_start_of_day, "baseline_nav_start_of_day")
+    spent_today = non_negative_number(spent_today, "spent_today")
+    trades_today = non_negative_int(trades_today, "trades_today")
+    candidate_value = non_negative_number(candidate_value, "candidate_value")
 
     budget = baseline_nav_start_of_day * profile.autonomy.daily_cumulative_pct / PERCENT
     remaining_budget = max(0.0, budget - spent_today)
@@ -882,10 +944,10 @@ def per_run_ceiling_check(
     per-run totals come from the decision log since the run marker (begin_run);
     this function holds only the arithmetic.
     """
-    if baseline_nav_start_of_day <= 0:
-        raise ValueError("baseline_nav_start_of_day must be positive")
-    if candidate_value < 0:
-        raise ValueError("candidate_value must be non-negative")
+    baseline_nav_start_of_day = valid_nav(baseline_nav_start_of_day, "baseline_nav_start_of_day")
+    spent_this_run = non_negative_number(spent_this_run, "spent_this_run")
+    trades_this_run = non_negative_int(trades_this_run, "trades_this_run")
+    candidate_value = non_negative_number(candidate_value, "candidate_value")
 
     budget = baseline_nav_start_of_day * profile.autonomy.per_run_pct / PERCENT
     remaining_budget = max(0.0, budget - spent_this_run)
@@ -933,9 +995,14 @@ def drawdown_kill_check(
     autonomy and require a manual re-arm — never auto-continue (spec, §B).
     Fires at or beyond the threshold (``>=``): a kill switch should not let the
     exact threshold slip through.
+
+    ``current_nav`` must be finite: a NaN used to compute a 0% drawdown and let
+    autonomy continue. A zero or negative current NAV is a real (total) loss and
+    simply kills.
     """
-    if nav_at_loop_start <= 0:
-        raise ValueError("nav_at_loop_start must be positive")
+    nav_at_loop_start = valid_nav(nav_at_loop_start, "nav_at_loop_start")
+    current_nav = finite_number(current_nav, "current_nav")
+    drawdown_kill_pct = percentage(drawdown_kill_pct, "drawdown_kill_pct")
 
     drawdown_pct = max(0.0, (nav_at_loop_start - current_nav) / nav_at_loop_start * PERCENT)
     kill = drawdown_pct >= drawdown_kill_pct

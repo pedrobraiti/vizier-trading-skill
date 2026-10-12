@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import autonomy, data_sufficiency, memory, reconcile, risk, scorecard
+from . import autonomy, data_sufficiency, memory, reconcile, risk, scorecard, valuation
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_PROFILE_PATH = os.environ.get(
@@ -134,8 +134,8 @@ def _cmd_close_thesis(payload: dict[str, Any], args: argparse.Namespace) -> Any:
         payload["ticker"],
         payload["open_date"],
         close_date=payload["close_date"],
-        exit_price=payload["exit_price"],
-        realized_pnl=payload["realized_pnl"],
+        exit_price=payload.get("exit_price"),
+        realized_pnl=payload.get("realized_pnl"),
         alpha_vs_spy=payload.get("alpha_vs_spy"),
         lesson=payload.get("lesson"),
         horizon_tag=payload.get("horizon_tag"),
@@ -160,6 +160,9 @@ def _cmd_reduce_thesis_qty(payload: dict[str, Any], args: argparse.Namespace) ->
         payload["ticker"],
         payload["open_date"],
         payload["qty_sold"],
+        exit_price=payload.get("exit_price"),
+        fees=payload.get("fees", 0.0),
+        exit_date=payload.get("exit_date"),
         horizon_tag=payload.get("horizon_tag"),
         memory_dir=args.memory_dir,
         commit=args.commit,
@@ -168,6 +171,24 @@ def _cmd_reduce_thesis_qty(payload: dict[str, Any], args: argparse.Namespace) ->
 
 def _cmd_append_decision(payload: dict[str, Any], args: argparse.Namespace) -> Any:
     return memory.append_decision(payload, memory_dir=args.memory_dir, commit=args.commit)
+
+
+def _cmd_nav(payload: dict[str, Any], args: argparse.Namespace) -> Any:
+    """One venue's NAV — broker-reported (IBKR) or computed from explicit cash +
+    priced holdings (crypto). Refuses an incomplete valuation, listing what's missing."""
+    for field in ("venue", "currency"):
+        if field not in payload:
+            raise ValueError(f"missing required field: {field}")
+    return valuation.compute_nav(
+        venue=payload["venue"],
+        currency=payload["currency"],
+        reported_nav=payload.get("reported_nav"),
+        reported_currency=payload.get("reported_currency"),
+        cash=payload.get("cash"),
+        holdings=payload.get("holdings"),
+        fx_rates=payload.get("fx_rates"),
+        cash_includes_reserved=bool(payload.get("cash_includes_reserved", False)),
+    )
 
 
 def _cmd_nav_snapshot(payload: dict[str, Any], args: argparse.Namespace) -> Any:
@@ -341,6 +362,7 @@ COMMANDS = {
     "reduce-thesis-qty": _cmd_reduce_thesis_qty,
     "update-reviewed": _cmd_update_reviewed,
     "append-decision": _cmd_append_decision,
+    "nav": _cmd_nav,
     "nav-snapshot": _cmd_nav_snapshot,
     "drawdown": _cmd_drawdown,
     "scorecard": _cmd_scorecard,
@@ -383,10 +405,16 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reject_non_finite_constant(token: str) -> Any:
+    """Strict JSON: ``NaN``/``Infinity`` are not JSON, and a NaN NAV used to slip
+    past every ``<= 0`` guard. Python's parser accepts them by default; refuse."""
+    raise ValueError(f"non-finite number {token} is not allowed in the payload")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        payload = json.loads(args.payload)
+        payload = json.loads(args.payload, parse_constant=_reject_non_finite_constant)
         if not isinstance(payload, dict):
             raise ValueError("--json payload must be a JSON object")
         data = COMMANDS[args.command](payload, args)
@@ -396,12 +424,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ok": True, "data": data}, ensure_ascii=True, default=str))
         return 0
     except Exception as exc:  # noqa: BLE001 - CLI boundary: report, never crash raw
-        print(
-            json.dumps(
-                {"ok": False, "error": str(exc), "error_type": type(exc).__name__},
-                ensure_ascii=True,
-            )
-        )
+        envelope: dict[str, Any] = {
+            "ok": False,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+        if isinstance(exc, valuation.IncompleteValuationError):
+            envelope["missing"] = exc.missing
+        print(json.dumps(envelope, ensure_ascii=True))
         return 1
 
 

@@ -740,3 +740,172 @@ def test_load_profile_resolves_active(profile_path):
 def test_load_profile_unknown_name_raises(profile_path):
     with pytest.raises(ValueError, match="not found"):
         risk.load_profile(profile_path, "does-not-exist")
+
+
+# ── Audit 10/10 item 2: invalid inputs never cross a guard as a number ────────
+
+NAN = float("nan")
+INF = float("inf")
+
+
+def test_audit_negative_slot_base_is_refused_not_sized(profile):
+    """REGRESSION (exact repro): position_size(-100, 5, 1000) returned size -65."""
+    with pytest.raises(ValueError, match="slot_base must be positive"):
+        risk.position_size(-100, 5, 1000, profile)
+
+
+@pytest.mark.parametrize("slot_base", [0, NAN, INF, -0.01])
+def test_position_size_rejects_non_positive_or_non_finite_slot_base(profile, slot_base):
+    with pytest.raises(ValueError, match="slot_base"):
+        risk.position_size(slot_base, 3, 1000, profile)
+
+
+@pytest.mark.parametrize("nav", [NAN, INF, 0, -1000])
+def test_position_size_rejects_invalid_nav(profile, nav):
+    with pytest.raises(ValueError, match="nav"):
+        risk.position_size(100, 3, nav, profile)
+
+
+@pytest.mark.parametrize("conviction", [0, 6, 2.5, NAN, -1])
+def test_position_size_rejects_conviction_outside_the_1_to_5_rubric(profile, conviction):
+    with pytest.raises(ValueError, match="conviction"):
+        risk.position_size(100, conviction, 1000, profile)
+
+
+def test_audit_nan_nav_no_longer_allows_a_million_dollar_buy(profile):
+    """REGRESSION (exact repro): limits with nav NaN answered allowed=True for $1M."""
+    with pytest.raises(ValueError, match="nav"):
+        risk.check_position_limits(
+            {"nav": NAN, "cash": 0, "positions": []},
+            {"ticker": "SYNTH", "value": 1_000_000, "sector": "tech"},
+            profile,
+        )
+
+
+def test_audit_negative_buy_value_is_refused_by_limits(profile):
+    """REGRESSION (exact repro): a -1000 'buy' passed every limit."""
+    with pytest.raises(ValueError, match="candidate.value"):
+        risk.check_position_limits(
+            {"nav": 1000, "cash": 1000, "positions": []},
+            {"ticker": "SYNTH", "value": -1000, "sector": "tech"},
+            profile,
+        )
+
+
+def test_limits_reject_non_finite_cash_and_position_value(profile):
+    with pytest.raises(ValueError, match="portfolio.cash"):
+        risk.check_position_limits(
+            {"nav": 1000, "cash": INF, "positions": []},
+            {"ticker": "A", "value": 10},
+            profile,
+        )
+    with pytest.raises(ValueError, match="positions"):
+        risk.check_position_limits(
+            {"nav": 1000, "cash": 500, "positions": [{"ticker": "B", "value": NAN}]},
+            {"ticker": "A", "value": 10},
+            profile,
+        )
+
+
+def test_audit_nan_current_nav_no_longer_reads_as_zero_drawdown():
+    """REGRESSION (exact repro): drawdown_kill_check(1000, NaN, 15) returned
+    kill=False with 0% drawdown, so autonomy continued on garbage."""
+    with pytest.raises(ValueError, match="current_nav"):
+        risk.drawdown_kill_check(1000, NAN, 15)
+
+
+def test_drawdown_kill_zero_current_nav_kills():
+    assert risk.drawdown_kill_check(1000, 0, 15)["kill"] is True
+
+
+def test_breaker_rejects_nan_legs_but_still_accepts_missing(profile):
+    """None = no data for the leg (unchanged); NaN is malformed and refused."""
+    assert risk.circuit_breaker_status(None, None, profile)["tripped"] is False
+    with pytest.raises(ValueError, match="vix"):
+        risk.circuit_breaker_status(NAN, None, profile)
+    with pytest.raises(ValueError, match="monthly_drawdown_pct"):
+        risk.circuit_breaker_status(None, NAN, profile)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"baseline_nav_start_of_day": NAN},
+        {"spent_today": -500},
+        {"spent_today": NAN},
+        {"trades_today": -1},
+        {"candidate_value": INF},
+    ],
+)
+def test_cumulative_ceiling_rejects_invalid_inputs(profile, overrides):
+    arguments = {
+        "baseline_nav_start_of_day": 1000,
+        "spent_today": 0,
+        "trades_today": 0,
+        "candidate_value": 10,
+    }
+    arguments.update(overrides)
+    with pytest.raises(ValueError):
+        risk.cumulative_ceiling_check(profile=profile, **arguments)
+
+
+def test_per_run_ceiling_rejects_negative_spend(profile):
+    with pytest.raises(ValueError, match="spent_this_run"):
+        risk.per_run_ceiling_check(1000, -400, 0, 10, profile)
+
+
+def test_trim_rejects_nan_price_and_step():
+    with pytest.raises(ValueError, match="current_price"):
+        risk.trim_quantity(current_qty=10, dollar_amount=50, current_price=NAN)
+    with pytest.raises(ValueError, match="step"):
+        risk.trim_quantity(current_qty=10, pct=50, step=NAN)
+
+
+_PROFILE_TEMPLATE = """
+active_profile: p
+conviction_floor: 2
+profiles:
+  p:
+    max_pct_per_asset: {max_pct_per_asset}
+    max_pct_per_sector: 40
+    min_cash_pct: {min_cash_pct}
+    max_positions: {max_positions}
+    conviction_full_size_pct_of_cap: {full_size}
+    circuit_breaker:
+      vix_threshold: 38
+      monthly_drawdown_pct: 18
+    autonomy:
+      per_run_pct: 33
+      per_run_max_trades: 5
+      daily_cumulative_pct: 50
+      daily_max_trades: 12
+      drawdown_kill_pct: 15
+"""
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"max_pct_per_asset": "250"}, "max_pct_per_asset"),
+        ({"max_pct_per_asset": "0"}, "max_pct_per_asset"),
+        ({"min_cash_pct": "-5"}, "min_cash_pct"),
+        ({"max_positions": "0"}, "max_positions"),
+        ({"full_size": ".nan"}, "conviction_full_size_pct_of_cap"),
+    ],
+)
+def test_load_profile_rejects_out_of_range_knobs(tmp_path, overrides, field):
+    values = {"max_pct_per_asset": "25", "min_cash_pct": "5", "max_positions": "8",
+              "full_size": "65"}
+    values.update(overrides)
+    path = tmp_path / "profile.yaml"
+    path.write_text(_PROFILE_TEMPLATE.format(**values), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        risk.load_profile(path)
+
+
+def test_shipped_risk_profiles_all_pass_validation():
+    from pathlib import Path
+
+    config = Path(__file__).resolve().parent.parent / "config" / "risk_profile.yaml"
+    for name in ("conservative", "moderate", "aggressive"):
+        assert risk.load_profile(config, name).name == name
